@@ -1,0 +1,40 @@
+{
+    "station":
+    [
+     {
+     "name": "Hits Radio Pride",
+     "streamURL": "https://stream-al.planetradio.co.uk/hitsradiopride.aac",
+     "imageURL": "station-hitsradiopride.png",
+     "desc": "Hits Radio Pride - 24/7",
+     "longDesc": "Long unnessecary description :)"
+     },
+     {
+     "name": "Vocaloid Radio",
+     "streamURL": "http://curiosity.shoutca.st:8019/128",
+     "imageURL": "station-vocaloid.jpg",
+     "desc": "Vocaloid songs",
+     "longDesc": "Very long description."
+     },
+     {
+     "name": "977 Todays Hits",
+     "streamURL": "https://17563.live.streamtheworld.com/977_HITS_SC",
+     "imageURL": "station-977.png",
+     "desc": "All todays hits",
+     "longDesc": "Streaming live from Florida.... Coz duhh why not!!"
+     },
+     {
+     "name": "Exclusive Ariana Grande",
+     "streamURL": "https://streaming.exclusive.radio/er/arianagrande/icecast.audio",
+     "imageURL": "station-arianagrande",
+     "desc": "Non stop Ariana Grande",
+     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     },
+     {
+     "name": "Exclusive Maroon 5",
+     "streamURL": "https://streaming.exclusive.radio/er/maroon5/icecast.audio",
+     "imageURL": "station-maroon5",
+     "desc": "Non stop Maroon 5",
+     "longDesc": "Maroon 5 24/7 - What more could you possibly want."
+     }
+    ]
+}
