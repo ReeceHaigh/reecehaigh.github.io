@@ -35,6 +35,13 @@
      "imageURL": "station-maroon5",
      "desc": "Non stop Maroon 5",
      "longDesc": "Maroon 5 24/7 - What more could you possibly want."
+     },
+     {
+     "name": "Exclusive Lady Gaga",
+     "streamURL": "https://streaming.exclusive.radio/er/ladygaga/icecast.audio",
+     "imageURL": "station-arianagrande",
+     "desc": "Non stop Lady Gaga",
+     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
      }
     ]
 }
