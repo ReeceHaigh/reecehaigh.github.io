@@ -42,6 +42,20 @@
      "imageURL": "station-arianagrande",
      "desc": "Non stop Lady Gaga",
      "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     },
+     {
+     "name": "Exclusive Nicki Minaj",
+     "streamURL": "https://streaming.exclusive.radio/er/nickiminaj/icecast.audio",
+     "imageURL": "station-default",
+     "desc": "Non stop Nicki Minaj",
+     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     },
+     {
+     "name": "Exclusive George Michael",
+     "streamURL": "https://streaming.exclusive.radio/er/georgemichael/icecast.audio",
+     "imageURL": "station-default",
+     "desc": "Non stop George Michael",
+     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
      }
     ]
 }
