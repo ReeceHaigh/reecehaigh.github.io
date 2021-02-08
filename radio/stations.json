@@ -102,9 +102,16 @@
      {
      "name": "Exclusive Chart",
      "streamURL": "https://streaming.exclusive.radio/er/chart/icecast.audio",
-"imageURL": "",
+     "imageURL": "station-default",
      "desc": "Today’s biggest hits non stop",
      "longDesc": "As the title says...."
+     },
+     {
+     "name": "Radio 1190",
+     "streamURL": "http://radio1190.colorado.edu:8000/high.mp3",
+     "imageURL": "",
+     "desc": "KVCU - Boulder, CO",
+     "longDesc": "Radio 1190 is the bomb."
      }
     ]
 }
