@@ -102,6 +102,7 @@
      {
      "name": "Exclusive Chart",
      "streamURL": "https://streaming.exclusive.radio/er/chart/icecast.audio",
+"imageURL": "",
      "desc": "Today’s biggest hits non stop",
      "longDesc": "As the title says...."
      }
