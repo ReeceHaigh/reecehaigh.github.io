@@ -56,6 +56,41 @@
      "imageURL": "station-default",
      "desc": "Non stop George Michael",
      "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     },
+     {
+     "name": "Exclusive 20s",
+     "streamURL": "https://streaming.exclusive.radio/er/2020/icecast.audio",
+     "imageURL": "station-default",
+     "desc": "Non stop hits from 2020-Now",
+     "longDesc": "As the title says...."
+     }
+     {
+     "name": "Exclusive 10s",
+     "streamURL": "https://streaming.exclusive.radio/er/10s/icecast.audio",
+     "imageURL": "station-default",
+     "desc": "Non stop hits from 2010-2019",
+     "longDesc": "As the title says...."
+     },
+     {
+     "name": "Exclusive 00s",
+     "streamURL": "https://streaming.exclusive.radio/er/00s/icecast.audio",
+     "imageURL": "station-default",
+     "desc": "Non stop hits from 2000-2009",
+     "longDesc": "As the title says...."
+     },
+     {
+     "name": "Exclusive 90s",
+     "streamURL": "https://streaming.exclusive.radio/er/90s/icecast.audio",
+     "imageURL": "station-default",
+     "desc": "Non stop hits from 1990-1999",
+     "longDesc": "As the title says...."
+     },
+     {
+     "name": "Exclusive 80s",
+     "streamURL": "https://streaming.exclusive.radio/er/80s/icecast.audio",
+     "imageURL": "",
+     "desc": "Non stop hits from 1980-1989",
+     "longDesc": "As the title says...."
      }
     ]
 }
