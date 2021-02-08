@@ -41,21 +41,21 @@
      "streamURL": "https://streaming.exclusive.radio/er/ladygaga/icecast.audio",
      "imageURL": "station-arianagrande",
      "desc": "Non stop Lady Gaga",
-     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     "longDesc": "As the title says... Nothing but Lady Gaga Songs."
      },
      {
      "name": "Exclusive Nicki Minaj",
      "streamURL": "https://streaming.exclusive.radio/er/nickiminaj/icecast.audio",
      "imageURL": "station-default",
      "desc": "Non stop Nicki Minaj",
-     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     "longDesc": "As the title says... Nothing but Nicki Minaj Songs."
      },
      {
      "name": "Exclusive George Michael",
      "streamURL": "https://streaming.exclusive.radio/er/georgemichael/icecast.audio",
      "imageURL": "station-default",
      "desc": "Non stop George Michael",
-     "longDesc": "As the title says... Nothing but Ariana Grande Songs."
+     "longDesc": "As the title says... Nothing but George Michael Songs."
      },
      {
      "name": "Exclusive 20s",
@@ -90,6 +90,20 @@
      "streamURL": "https://streaming.exclusive.radio/er/80s/icecast.audio",
      "imageURL": "",
      "desc": "Non stop hits from 1980-1989",
+     "longDesc": "As the title says...."
+     },
+     {
+     "name": "Exclusive -Country-",
+     "streamURL": "https://streaming.exclusive.radio/er/country/icecast.audio",
+     "imageURL": "",
+     "desc": "All Classic Country All The Time",
+     "longDesc": "As the title says...."
+     },
+     {
+     "name": "Exclusive -Chart-",
+     "streamURL": "https://streaming.exclusive.radio/er/chart/icecast.audio",
+     "imageURL": "",
+     "desc": "Today’s biggest hits non stop",
      "longDesc": "As the title says...."
      }
     ]
