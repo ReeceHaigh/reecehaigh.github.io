@@ -25,7 +25,7 @@
      {
      "name": "Exclusive Ariana Grande",
      "streamURL": "https://streaming.exclusive.radio/er/arianagrande/icecast.audio",
-     "imageURL": "station-arianagrande",
+     "imageURL": "",
      "desc": "Non stop Ariana Grande",
      "longDesc": "As the title says... Nothing but Ariana Grande Songs."
      },
@@ -39,7 +39,7 @@
      {
      "name": "Exclusive Lady Gaga",
      "streamURL": "https://streaming.exclusive.radio/er/ladygaga/icecast.audio",
-     "imageURL": "station-arianagrande",
+     "imageURL": "",
      "desc": "Non stop Lady Gaga",
      "longDesc": "As the title says... Nothing but Lady Gaga Songs."
      },
@@ -95,7 +95,7 @@
      {
      "name": "Exclusive -Country-",
      "streamURL": "https://streaming.exclusive.radio/er/country/icecast.audio",
-     "imageURL": "station-default",
+     "imageURL": "",
      "desc": "All Classic Country All The Time",
      "longDesc": "As the title says...."
      },
