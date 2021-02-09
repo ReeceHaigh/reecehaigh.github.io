@@ -112,6 +112,13 @@
      "imageURL": "",
      "desc": "KVCU - Boulder, CO",
      "longDesc": "Radio 1190 is the bomb."
+     },
+     {
+     "name": "Pride Radio ",
+     "streamURL": "https://richkell.radioca.st/stream.mp3",
+     "imageURL": "https://reecehaigh.com/radio/stations/prideradio.png",
+     "desc": "Newcastle",
+     "longDesc": "The North East's only radio station for the LGBT community - https://prideradio.co.uk/"
      }
     ]
 }
