@@ -12,15 +12,15 @@
      "name": "Vocaloid Radio",
      "streamURL": "http://curiosity.shoutca.st:8019/128",
      "imageURL": "station-vocaloid.jpg",
-     "desc": "Vocaloid songs",
-     "longDesc": "Very long description."
+     "desc": "World",
+     "longDesc": "Vocaloid songs."
      },
      {
      "name": "977 Todays Hits",
      "streamURL": "https://17563.live.streamtheworld.com/977_HITS_SC",
      "imageURL": "station-977.png",
-     "desc": "All todays hits",
-     "longDesc": "Streaming live from Florida.... Coz duhh why not!!"
+     "desc": "Florida, USA",
+     "longDesc": "All todays hits Streaming live from Florida.... Coz duhh why not!!"
      },
      {
      "name": "Exclusive Ariana Grande",
@@ -60,49 +60,49 @@
      {
      "name": "Exclusive 20s",
      "streamURL": "https://streaming.exclusive.radio/er/2020/icecast.audio",
-     "imageURL": "station-default",
+     "imageURL": "https://reecehaigh.com/radio/stations/decades.png",
      "desc": "Non stop hits from 2020-Now",
      "longDesc": "As the title says...."
      },
      {
      "name": "Exclusive 10s",
      "streamURL": "https://streaming.exclusive.radio/er/10s/icecast.audio",
-     "imageURL": "station-default",
+     "imageURL": "https://reecehaigh.com/radio/stations/decades.png",
      "desc": "Non stop hits from 2010-2019",
      "longDesc": "As the title says...."
      },
      {
      "name": "Exclusive 00s",
      "streamURL": "https://streaming.exclusive.radio/er/00s/icecast.audio",
-     "imageURL": "station-default",
+     "imageURL": "https://reecehaigh.com/radio/stations/decades.png",
      "desc": "Non stop hits from 2000-2009",
      "longDesc": "As the title says...."
      },
      {
      "name": "Exclusive 90s",
      "streamURL": "https://streaming.exclusive.radio/er/90s/icecast.audio",
-     "imageURL": "station-default",
+     "imageURL": "https://reecehaigh.com/radio/stations/decades.png",
      "desc": "Non stop hits from 1990-1999",
      "longDesc": "As the title says...."
      },
      {
      "name": "Exclusive 80s",
      "streamURL": "https://streaming.exclusive.radio/er/80s/icecast.audio",
-     "imageURL": "station-default",
+     "imageURL": "https://reecehaigh.com/radio/stations/decades.png",
      "desc": "Non stop hits from 1980-1989",
      "longDesc": "As the title says...."
      },
      {
      "name": "Exclusive -Country-",
      "streamURL": "https://streaming.exclusive.radio/er/country/icecast.audio",
-     "imageURL": "",
+     "imageURL": "https://reecehaigh.com/radio/stations/country.png",
      "desc": "All Classic Country All The Time",
      "longDesc": "As the title says...."
      },
      {
      "name": "Exclusive Chart",
      "streamURL": "https://streaming.exclusive.radio/er/chart/icecast.audio",
-     "imageURL": "",
+     "imageURL": "https://reecehaigh.com/radio/stations/chart.png",
      "desc": "Today’s biggest hits non stop",
      "longDesc": "As the title says...."
      },
@@ -114,11 +114,18 @@
      "longDesc": "Radio 1190 is the bomb."
      },
      {
-     "name": "Pride Radio ",
+     "name": "Pride Radio",
      "streamURL": "https://richkell.radioca.st/stream.mp3",
      "imageURL": "https://reecehaigh.com/radio/stations/prideradio.png",
-     "desc": "Newcastle",
+     "desc": "Newcastle, UK",
      "longDesc": "The North East's only radio station for the LGBT community - https://prideradio.co.uk/"
+     },
+     {
+     "name": "Gaydio",
+     "streamURL": "https://listen-gaydio.sharp-stream.com/gaydioukhq.mp3",
+     "imageURL": "",
+     "desc": "Manchester, UK",
+     "longDesc": "Gaydio is the world's biggest LGBT+ radio station. You can get Gaydio on DAB Digital Radio across London, Birmingham, Glasgow and Portsmouth on 97.8FM and DAB across Brighton & Hove and 88.4FM and DAB across Greater Manchester, on mobile apps and at gaydio.co.uk."
      }
     ]
 }
