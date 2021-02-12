@@ -58,6 +58,13 @@
      "longDesc": "As the title says... Nothing but George Michael Songs."
      },
      {
+     "name": "Exclusive Rihanna",
+     "streamURL": "https://streaming.exclusive.radio/er/rihanna/icecast.audio",
+     "imageURL": "https://assets.reecehaigh.com/radio/stations/rihanna.jpg",
+     "desc": "Non stop Rihanna",
+     "longDesc": "As the title says... Nothing but Rihanna Songs."
+     },
+     {
      "name": "Exclusive 20s",
      "streamURL": "https://streaming.exclusive.radio/er/2020/icecast.audio",
      "imageURL": "https://assets.reecehaigh.com/radio/stations/decades.png",
