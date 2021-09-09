@@ -133,6 +133,20 @@
      "imageURL": "station-default",
      "desc": "Manchester, UK",
      "longDesc": "Gaydio is the world's biggest LGBT+ radio station. You can get Gaydio on DAB Digital Radio across London, Birmingham, Glasgow and Portsmouth on 97.8FM and DAB across Brighton & Hove and 88.4FM and DAB across Greater Manchester, on mobile apps and at gaydio.co.uk."
+     },
+     {
+     "name": "Heart 80's",
+     "streamURL": "https://media-ice.musicradio.com/Heart80sMP3",
+     "imageURL": "station-default",
+     "desc": "Short Desc",
+     "longDesc": "Long Desc"
+     },
+     {
+     "name": "Fallout 4 Radio",
+     "streamURL": "http://fallout.fm:8000/falloutfm6.ogg",
+     "imageURL": "station-default",
+     "desc": "Short Desc",
+     "longDesc": "Long Desc"
      }
     ]
 }
