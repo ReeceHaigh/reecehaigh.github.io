@@ -57,7 +57,11 @@ hr {
   <div class="middle">
     <h1>Last Orders At The Bar - The Bar Closes In</h1>
     <hr>
-    <p><a href="https://docs.google.com/forms/d/e/1FAIpQLSe7Mr6SjwVwAm-2aYAWII3HgzW2SLXVkrlNwrzbMGSltGF33w/viewform?usp=sf_link" target="_blank" style="background-color:#ffffff">Contact Form</a></p>
+    <p>
+<script src="https://cdn.logwork.com/widget/countdown.js"></script>
+<a href="https://logwork.com/countdown-8ob7" class="countdown-timer" data-timezone="Europe/London" data-date="2023-12-18 23:30" data-background="#c21f1f">The Bar Closes In</a>
+
+</p>
   </div>
 </div>
 
