@@ -13,6 +13,7 @@
 html, body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -25,11 +26,13 @@ button {
 
 .hidden { display: none !important; }
 
-/* 100vh on iOS Safari is the height with the address bar hidden, so real
-   content gets cut off behind the bar when it's showing — 100dvh tracks
-   the actual visible viewport. The 100vh line is a fallback for browsers
-   that don't support dvh yet. */
-.screen { height: 100vh; height: 100dvh; }
+/* iOS Safari's address/tab bar shows and hides as you scroll, and neither
+   100vh (assumes the bar is hidden — too tall) nor 100dvh (inconsistent
+   across iOS Safari versions) reliably tracks the real visible height. The
+   --vh custom property is computed from visualViewport in app.js, which
+   does track it correctly, with 100vh/100dvh as fallbacks if JS hasn't run
+   yet or the property is unsupported. */
+.screen { height: 100vh; height: 100dvh; height: calc(var(--vh, 1vh) * 100); }
 
 /* Login */
 #login-screen {

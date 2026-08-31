@@ -1,6 +1,21 @@
 const PRODUCT = "reecehaigh.com radio";
 const VERSION = "1.0";
 
+// iOS Safari's address/tab bar shows and hides as you scroll, and CSS vh/dvh
+// units don't reliably track that across iOS Safari versions — visualViewport
+// (or innerHeight as a fallback) does. Drives the --vh custom property that
+// .screen's height is calculated from.
+function setViewportHeight() {
+  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty("--vh", `${h * 0.01}px`);
+}
+setViewportHeight();
+window.addEventListener("resize", setViewportHeight);
+window.addEventListener("orientationchange", setViewportHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", setViewportHeight);
+}
+
 const store = {
   get clientId() {
     let id = localStorage.getItem("plex_client_id");
