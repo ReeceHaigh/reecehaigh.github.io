@@ -151,21 +151,26 @@ async function discoverServer(token) {
   const resources = await res.json();
   const servers = resources.filter(r => (r.provides || "").includes("server"));
 
+  const failures = [];
   for (const server of servers) {
     const conns = [...(server.connections || [])].sort((a, b) => (a.local === b.local) ? 0 : (a.local ? 1 : -1));
     for (const conn of conns) {
       try {
         const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 3000);
-        const r = await fetch(`${conn.uri}/identity`, { signal: controller.signal });
+        const t = setTimeout(() => controller.abort(), 6000);
+        const r = await fetch(`${conn.uri}/identity?X-Plex-Token=${token}`, { signal: controller.signal });
         clearTimeout(t);
         if (r.ok) {
           return { name: server.name, uri: conn.uri };
         }
-      } catch (e) { /* try next connection */ }
+        failures.push(`${conn.uri} → HTTP ${r.status}`);
+      } catch (e) {
+        failures.push(`${conn.uri} → ${e.message}`);
+      }
     }
   }
-  throw new Error("Could not reach any Plex server");
+  console.warn("Plex server discovery failed for these connections:", failures);
+  throw new Error(`Could not reach any Plex server (${failures.length} attempted — see console for details)`);
 }
 
 // ---------- App state ----------
