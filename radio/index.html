@@ -47,7 +47,7 @@
   </main>
 
   <footer id="now-playing">
-    <div class="np-meta">
+    <div class="np-meta" id="np-meta">
       <img id="np-art" src="" alt="">
       <div class="np-text">
         <div id="np-title">Nothing playing</div>
@@ -55,9 +55,11 @@
       </div>
     </div>
     <div class="np-controls">
+      <button id="np-shuffle" class="control-toggle" title="Shuffle">🔀</button>
       <button id="np-prev" title="Previous">⏮</button>
       <button id="np-play" title="Play/Pause">▶</button>
       <button id="np-next" title="Next">⏭</button>
+      <button id="np-repeat" class="control-toggle" title="Repeat">🔁</button>
     </div>
     <div class="np-progress">
       <span id="np-time-current">0:00</span>
@@ -69,6 +71,35 @@
       <input id="np-volume" type="range" min="0" max="100" value="100">
     </div>
   </footer>
+</div>
+
+<div id="now-playing-full" class="now-playing-full hidden">
+  <div class="fs-header">
+    <button id="fs-collapse" aria-label="Collapse">⌄</button>
+    <div class="fs-header-title">Now Playing</div>
+    <span></span>
+  </div>
+  <div class="fs-art-wrap">
+    <img id="fs-art" src="" alt="">
+  </div>
+  <div class="fs-meta">
+    <div id="fs-title">Nothing playing</div>
+    <div id="fs-artist"></div>
+  </div>
+  <div class="fs-progress">
+    <input id="fs-seek" type="range" min="0" max="100" value="0">
+    <div class="fs-times">
+      <span id="fs-time-current">0:00</span>
+      <span id="fs-time-total">0:00</span>
+    </div>
+  </div>
+  <div class="fs-controls">
+    <button id="fs-shuffle" class="control-toggle" title="Shuffle">🔀</button>
+    <button id="fs-prev" title="Previous">⏮</button>
+    <button id="fs-play" title="Play/Pause">▶</button>
+    <button id="fs-next" title="Next">⏭</button>
+    <button id="fs-repeat" class="control-toggle" title="Repeat">🔁</button>
+  </div>
 </div>
 
 <audio id="audio"></audio>
