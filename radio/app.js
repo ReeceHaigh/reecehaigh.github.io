@@ -147,6 +147,24 @@ class PlexAPI {
     return this.get(`/library/sections/${sectionKey}/recentlyAdded`).then(c => c.Metadata || []);
   }
 
+  getPlaylists() {
+    return this.get("/playlists?playlistType=audio").then(c =>
+      (c.Metadata || []).filter(p => p.playlistType === "audio")
+    );
+  }
+
+  getPlaylistItems(ratingKey) {
+    return this.get(`/playlists/${ratingKey}/items`).then(c => c.Metadata || []);
+  }
+
+  reportScrobble(ratingKey) {
+    // Marks a track as played (view count / recently-played history in Plex
+    // itself) — fire-and-forget, matches what Plexamp and the official
+    // clients do once a track has mostly finished playing.
+    const url = `${this.baseUrl}/:/scrobble?key=${ratingKey}&identifier=com.plexapp.plugins.library&X-Plex-Token=${this.token}`;
+    fetch(url).catch(() => {});
+  }
+
   getChildren(ratingKey) {
     return this.get(`/library/metadata/${ratingKey}/children`).then(c => c.Metadata || []);
   }
@@ -208,6 +226,7 @@ let order = [];       // playback order — indices into `queue`
 let orderPos = -1;    // position within `order`
 let shuffleOn = store.shuffle;
 let repeatMode = store.repeatMode; // "off" | "all" | "one"
+let scrobbledCurrent = false; // whether the current track has already been reported played to Plex
 
 const el = (id) => document.getElementById(id);
 const audio = el("audio");
@@ -233,6 +252,19 @@ function renderArtistCard(artist) {
     <div class="card-title">${artist.title}</div>
   `;
   div.onclick = () => showArtist(artist);
+  return div;
+}
+
+function renderPlaylistCard(playlist) {
+  const div = document.createElement("div");
+  div.className = "card";
+  const count = playlist.leafCount != null ? `${playlist.leafCount} track${playlist.leafCount === 1 ? "" : "s"}` : "";
+  div.innerHTML = `
+    <img loading="lazy" src="${api.thumbUrl(playlist.composite || playlist.thumb)}" alt="">
+    <div class="card-title">${playlist.title}</div>
+    <div class="card-sub">${count}</div>
+  `;
+  div.onclick = () => showPlaylistDetail(playlist);
   return div;
 }
 
@@ -335,6 +367,47 @@ async function showAlbum(album) {
   });
 }
 
+async function showPlaylists() {
+  switchView("playlists");
+  const container = el("view-playlists");
+  container.innerHTML = `<div class="section-heading">Playlists</div><div class="grid" id="playlists-grid"></div>`;
+  const grid = el("playlists-grid");
+  const playlists = await api.getPlaylists();
+  if (!playlists.length) {
+    grid.outerHTML = `<p style="color:var(--text-dim)">No playlists yet.</p>`;
+    return;
+  }
+  playlists
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .forEach(p => grid.appendChild(renderPlaylistCard(p)));
+}
+
+async function showPlaylistDetail(playlist) {
+  switchView("playlist-detail");
+  const container = el("view-playlist-detail");
+  container.innerHTML = `
+    <button class="back-btn" id="playlist-back">&larr; Back</button>
+    <div class="section-heading">${playlist.title}</div>
+    <div id="playlist-track-list"></div>
+  `;
+  el("playlist-back").onclick = () => showPlaylists();
+
+  const tracks = await api.getPlaylistItems(playlist.ratingKey);
+  const list = el("playlist-track-list");
+  tracks.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.dataset.ratingKey = track.ratingKey;
+    row.innerHTML = `
+      <div class="idx">${i + 1}</div>
+      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+    `;
+    row.onclick = () => playQueue(tracks, i);
+    list.appendChild(row);
+  });
+}
+
 async function showSearchResults(query) {
   switchView("search");
   const container = el("view-search");
@@ -389,6 +462,7 @@ function playCurrent() {
   audio.play().catch(() => {});
   syncNowPlayingUI(track);
   highlightPlayingRow(track.ratingKey);
+  scrobbledCurrent = false;
 }
 
 function highlightPlayingRow(ratingKey) {
@@ -449,6 +523,14 @@ audio.addEventListener("timeupdate", () => {
         position: audio.currentTime,
       });
     } catch (e) { /* ignore — some browsers reject edge-case values */ }
+  }
+
+  if (!scrobbledCurrent && pct >= 90) {
+    const track = queue[order[orderPos]];
+    if (track) {
+      scrobbledCurrent = true;
+      api.reportScrobble(track.ratingKey);
+    }
   }
 });
 
@@ -591,6 +673,7 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
     if (view === "home") showHome();
     if (view === "artists") showArtists();
     if (view === "albums") showAlbums();
+    if (view === "playlists") showPlaylists();
     closeSidebar();
   };
 });
@@ -605,6 +688,32 @@ function closeSidebar() {
 }
 el("menu-toggle").onclick = openSidebar;
 el("sidebar-backdrop").onclick = closeSidebar;
+
+function showToast(message, duration = 2500) {
+  const toast = el("toast");
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => toast.classList.add("hidden"), duration);
+}
+
+// Tap the logo 7 times quickly — works on both the sidebar and mobile-bar
+// version, since the mobile-bar one is what most people actually see day to day.
+let logoTapCount = 0;
+let logoTapResetTimer = null;
+function handleLogoTap() {
+  logoTapCount++;
+  clearTimeout(logoTapResetTimer);
+  logoTapResetTimer = setTimeout(() => { logoTapCount = 0; }, 2500);
+  if (logoTapCount >= 7) {
+    logoTapCount = 0;
+    document.body.classList.add("disco");
+    showToast("🕺 disco mode activated", 4000);
+    setTimeout(() => document.body.classList.remove("disco"), 4000);
+  }
+}
+el("sidebar-logo").addEventListener("click", handleLogoTap);
+document.querySelector("#mobile-bar h1").addEventListener("click", handleLogoTap);
 
 el("search-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.value.trim()) {

@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>radio — reecehaigh.com</title>
 <link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0d0d0e">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="radio">
 </head>
 <body>
 
@@ -24,11 +31,12 @@
   </header>
   <div id="sidebar-backdrop" class="hidden"></div>
   <aside id="sidebar">
-    <h1>radio</h1>
+    <h1 id="sidebar-logo">radio</h1>
     <nav>
       <button class="nav-btn active" data-view="home">Home</button>
       <button class="nav-btn" data-view="artists">Artists</button>
       <button class="nav-btn" data-view="albums">Albums</button>
+      <button class="nav-btn" data-view="playlists">Playlists</button>
     </nav>
     <div class="search-box">
       <input id="search-input" type="search" placeholder="Search library…">
@@ -43,6 +51,8 @@
     <div id="view-artists" class="view hidden"></div>
     <div id="view-albums" class="view hidden"></div>
     <div id="view-album-detail" class="view hidden"></div>
+    <div id="view-playlists" class="view hidden"></div>
+    <div id="view-playlist-detail" class="view hidden"></div>
     <div id="view-search" class="view hidden"></div>
   </main>
 
@@ -103,6 +113,7 @@
 </div>
 
 <audio id="audio"></audio>
+<div id="toast" class="toast hidden"></div>
 
 <script src="app.js"></script>
 </body>

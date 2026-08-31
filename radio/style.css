@@ -456,3 +456,30 @@ input[type=range]::-moz-range-thumb {
 }
 .fs-controls .control-toggle { font-size: 1.1em; }
 #fs-play { font-size: 2.6em; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(6em + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(0);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.7em 1.2em;
+  border-radius: 8px;
+  font-size: 0.9em;
+  z-index: 400;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  opacity: 1;
+}
+.toast.hidden { opacity: 0; transform: translateX(-50%) translateY(10px); pointer-events: none; }
+
+/* A little something for anyone clicking the logo too many times */
+@keyframes discoHue {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
+}
+body.disco { animation: discoHue 1.2s linear infinite; }
+#sidebar-logo, #mobile-bar h1 { cursor: pointer; user-select: none; }
