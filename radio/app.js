@@ -525,7 +525,14 @@ el("np-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
 el("np-volume").oninput = (e) => { audio.volume = e.target.value / 100; };
-el("np-meta").onclick = openNowPlayingFull;
+
+// Tapping anywhere on the mini-player opens the full-screen view, except the
+// actual controls (buttons/sliders) — a much larger, more forgiving target
+// than just the album art, especially on a phone.
+el("now-playing").addEventListener("click", (e) => {
+  if (e.target.closest("button, input")) return;
+  openNowPlayingFull();
+});
 
 el("fs-play").onclick = togglePlay;
 el("fs-next").onclick = () => advance(false);
