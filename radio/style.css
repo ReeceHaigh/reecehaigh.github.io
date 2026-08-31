@@ -268,7 +268,7 @@ button {
   gap: 1.5em;
   padding: 0.6em 1.5em;
 }
-.np-meta { display: flex; align-items: center; gap: 0.7em; overflow: hidden; }
+.np-meta { display: flex; align-items: center; gap: 0.7em; overflow: hidden; cursor: pointer; }
 .np-meta img {
   width: 46px; height: 46px; border-radius: 4px; object-fit: cover; background: #1e1f22;
 }
@@ -285,6 +285,29 @@ button {
 }
 .np-controls button:hover { color: var(--accent); }
 #np-play { font-size: 1.5em; }
+
+/* These are full-color emoji glyphs, so CSS `color` can't distinguish
+   active/inactive state — opacity works on any glyph, colored or not. */
+.control-toggle { font-size: 1em; opacity: 0.4; position: relative; transition: opacity 0.15s ease; }
+.control-toggle:hover { opacity: 0.7; }
+.control-toggle.active { opacity: 1; }
+.control-toggle.active:hover { opacity: 1; }
+.control-toggle.repeat-one::after {
+  content: "1";
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  font-size: 0.55em;
+  background: var(--accent);
+  color: #1a1200;
+  border-radius: 50%;
+  width: 1.2em;
+  height: 1.2em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
 
 .np-progress { display: flex; align-items: center; gap: 0.6em; font-size: 0.75em; color: var(--text-dim); }
 .np-progress input[type=range] { flex: 1; }
@@ -345,4 +368,84 @@ input[type=range]::-moz-range-thumb {
   #now-playing { grid-template-columns: 1fr auto; grid-template-areas: "meta controls" "progress progress"; }
   .np-progress { grid-column: 1 / -1; }
   .np-volume { display: none; }
+  /* Mini-player stays minimal on mobile — shuffle/repeat live in the
+     full-screen view (opened by tapping the mini-player) instead. */
+  #now-playing .control-toggle { display: none; }
 }
+
+/* Full-screen now-playing overlay */
+.now-playing-full {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 1em 1.5em 2em;
+  transform: translateY(0);
+  transition: transform 0.3s ease;
+}
+.now-playing-full.hidden { transform: translateY(100%); display: flex !important; visibility: hidden; }
+
+.fs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.fs-header button {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.6em;
+  line-height: 1;
+  padding: 0.2em 0.4em;
+}
+.fs-header-title {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.fs-art-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.fs-art-wrap img {
+  max-width: min(80vw, 420px);
+  max-height: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.fs-meta { text-align: center; margin: 1.2em 0 0.5em; flex-shrink: 0; }
+#fs-title { font-size: 1.3em; font-weight: 600; }
+#fs-artist { color: var(--text-dim); margin-top: 0.3em; }
+
+.fs-progress { flex-shrink: 0; margin: 1em 0; }
+.fs-progress input[type=range] { width: 100%; }
+.fs-times { display: flex; justify-content: space-between; font-size: 0.75em; color: var(--text-dim); margin-top: 0.3em; }
+
+.fs-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.8em;
+  flex-shrink: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.fs-controls button {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.6em;
+}
+.fs-controls .control-toggle { font-size: 1.1em; }
+#fs-play { font-size: 2.6em; }
