@@ -151,9 +151,15 @@ async function discoverServer(token) {
   const resources = await res.json();
   const servers = resources.filter(r => (r.provides || "").includes("server"));
 
+  // Prefer local LAN connections (fastest when on the home network), then a
+  // direct remote connection, and only fall back to Plex Relay last — relay
+  // is bandwidth-capped and known to reset sustained streams like audio even
+  // though it happily serves small metadata/image requests.
+  const connScore = (c) => c.local ? 0 : (c.relay ? 2 : 1);
+
   const failures = [];
   for (const server of servers) {
-    const conns = [...(server.connections || [])].sort((a, b) => (a.local === b.local) ? 0 : (a.local ? 1 : -1));
+    const conns = [...(server.connections || [])].sort((a, b) => connScore(a) - connScore(b));
     for (const conn of conns) {
       try {
         const controller = new AbortController();
@@ -161,7 +167,8 @@ async function discoverServer(token) {
         const r = await fetch(`${conn.uri}/identity?X-Plex-Token=${token}`, { signal: controller.signal });
         clearTimeout(t);
         if (r.ok) {
-          return { name: server.name, uri: conn.uri };
+          console.log(`Plex: using ${conn.uri}`, { local: conn.local, relay: conn.relay });
+          return { name: server.name, uri: conn.uri, relay: !!conn.relay };
         }
         failures.push(`${conn.uri} → HTTP ${r.status}`);
       } catch (e) {
@@ -450,7 +457,9 @@ async function boot() {
 
   try {
     let server = store.server;
-    if (!server) {
+    // server.relay is only present on connections picked up after the relay-
+    // avoidance fix — re-discover once for anyone with an older cached entry.
+    if (!server || server.relay === undefined) {
       server = await discoverServer(token);
       store.server = server;
     }
@@ -481,7 +490,7 @@ async function boot() {
       showHome();
     };
 
-    el("server-info").textContent = server.name;
+    el("server-info").textContent = server.relay ? `${server.name} (via relay)` : server.name;
     el("login-screen").classList.add("hidden");
     el("app").classList.remove("hidden");
     showHome();
