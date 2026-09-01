@@ -38,6 +38,8 @@ const store = {
   set shuffle(v) { localStorage.setItem("plex_shuffle", v ? "1" : "0"); },
   get repeatMode() { return localStorage.getItem("plex_repeat") || "off"; },
   set repeatMode(v) { localStorage.setItem("plex_repeat", v); },
+  get radioMode() { return localStorage.getItem("plex_radio") === "1"; },
+  set radioMode(v) { localStorage.setItem("plex_radio", v ? "1" : "0"); },
 };
 
 // ---------- Plex OAuth ----------
@@ -157,6 +159,32 @@ class PlexAPI {
     return this.get(`/playlists/${ratingKey}/items`).then(c => c.Metadata || []);
   }
 
+  getFacet(sectionKey, facet, type) {
+    return this.get(`/library/sections/${sectionKey}/${facet}?type=${type}`).then(c => c.Directory || []);
+  }
+
+  getFilteredItems(sectionKey, filterField, tagKey, resultType) {
+    return this.get(`/library/sections/${sectionKey}/all?type=${resultType}&${filterField}=${tagKey}`).then(c => c.Metadata || []);
+  }
+
+  getTrackCount(sectionKey) {
+    return this.get(`/library/sections/${sectionKey}/all?type=10&X-Plex-Container-Start=0&X-Plex-Container-Size=0`)
+      .then(c => c.totalSize ?? 0);
+  }
+
+  getAllTracks(sectionKey) {
+    return this.get(`/library/sections/${sectionKey}/all?type=10`).then(c => c.Metadata || []);
+  }
+
+  getFolder(sectionKey, parentId) {
+    const q = parentId ? `?parent=${parentId}` : "";
+    return this.get(`/library/sections/${sectionKey}/folder${q}`).then(c => c.Metadata || []);
+  }
+
+  getSonicallySimilar(ratingKey, limit = 20) {
+    return this.get(`/library/metadata/${ratingKey}/nearest?type=10&limit=${limit}`).then(c => c.Metadata || []);
+  }
+
   reportScrobble(ratingKey) {
     // Marks a track as played (view count / recently-played history in Plex
     // itself) — fire-and-forget, matches what Plexamp and the official
@@ -227,6 +255,16 @@ let orderPos = -1;    // position within `order`
 let shuffleOn = store.shuffle;
 let repeatMode = store.repeatMode; // "off" | "all" | "one"
 let scrobbledCurrent = false; // whether the current track has already been reported played to Plex
+let radioOn = store.radioMode;
+let folderStack = [{ parentId: null, label: "Folders" }];
+
+const LIBRARY_CATEGORIES = [
+  { id: "genre-artist", label: "Artist Genres", noun: "genres", facet: "genre", facetType: 8, filterField: "genre", resultType: 8 },
+  { id: "genre-album", label: "Album Genres", noun: "genres", facet: "genre", facetType: 9, filterField: "genre", resultType: 9 },
+  { id: "style", label: "Styles", noun: "styles", facet: "style", facetType: 9, filterField: "style", resultType: 9 },
+  { id: "mood", label: "Moods", noun: "moods", facet: "mood", facetType: 9, filterField: "mood", resultType: 9 },
+  { id: "label", label: "Record Labels", noun: "labels", facet: "studio", facetType: 9, filterField: "studio", resultType: 9 },
+];
 
 const el = (id) => document.getElementById(id);
 const audio = el("audio");
@@ -408,6 +446,149 @@ async function showPlaylistDetail(playlist) {
   });
 }
 
+function renderSimpleRow(title, sub, onClick) {
+  const row = document.createElement("div");
+  row.className = "simple-row";
+  row.innerHTML = `
+    <div>
+      <div class="row-title">${title}</div>
+      ${sub ? `<div class="row-sub">${sub}</div>` : ""}
+    </div>
+    <div class="row-chevron">&rsaquo;</div>
+  `;
+  row.onclick = onClick;
+  return row;
+}
+
+async function showLibrary() {
+  switchView("library");
+  const container = el("view-library");
+  container.innerHTML = `<div class="section-heading">Library</div><div id="library-rows"></div>`;
+  const rows = el("library-rows");
+
+  LIBRARY_CATEGORIES.forEach(async (cat) => {
+    const row = renderSimpleRow(cat.label, "…", () => showTagList(cat));
+    rows.appendChild(row);
+    try {
+      const tags = await api.getFacet(musicSectionKey, cat.facet, cat.facetType);
+      row.querySelector(".row-sub").textContent = `${tags.length} ${cat.noun}`;
+    } catch (e) {
+      row.querySelector(".row-sub").textContent = "unavailable";
+    }
+  });
+
+  const foldersRow = renderSimpleRow("Folders", "…", () => {
+    folderStack = [{ parentId: null, label: "Folders" }];
+    showFolder();
+  });
+  rows.appendChild(foldersRow);
+  api.getFolder(musicSectionKey).then(items => {
+    foldersRow.querySelector(".row-sub").textContent = `${items.length} folders`;
+  });
+
+  const tracksRow = renderSimpleRow("All Tracks", "…", () => showAllTracks());
+  rows.appendChild(tracksRow);
+  api.getTrackCount(musicSectionKey).then(count => {
+    tracksRow.querySelector(".row-sub").textContent = `${count} tracks`;
+  });
+}
+
+async function showTagList(category) {
+  switchView("tag-list");
+  const container = el("view-tag-list");
+  container.innerHTML = `
+    <button class="back-btn" id="tag-list-back">&larr; Back</button>
+    <div class="section-heading">${category.label}</div>
+    <div id="tag-list-rows"></div>
+  `;
+  el("tag-list-back").onclick = () => showLibrary();
+  const rows = el("tag-list-rows");
+  const tags = await api.getFacet(musicSectionKey, category.facet, category.facetType);
+  tags
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .forEach(tag => rows.appendChild(renderSimpleRow(tag.title, "", () => showTagDetail(category, tag))));
+}
+
+async function showTagDetail(category, tag) {
+  switchView("tag-detail");
+  const container = el("view-tag-detail");
+  container.innerHTML = `
+    <button class="back-btn" id="tag-detail-back">&larr; Back</button>
+    <div class="section-heading">${tag.title}</div>
+    <div class="grid" id="tag-detail-grid"></div>
+  `;
+  el("tag-detail-back").onclick = () => showTagList(category);
+  const grid = el("tag-detail-grid");
+  const items = await api.getFilteredItems(musicSectionKey, category.filterField, tag.key, category.resultType);
+  items.forEach(item => {
+    grid.appendChild(category.resultType === 8 ? renderArtistCard(item) : renderAlbumCard(item));
+  });
+}
+
+async function showAllTracks() {
+  switchView("all-tracks");
+  const container = el("view-all-tracks");
+  container.innerHTML = `<div class="section-heading">All Tracks</div><div id="all-tracks-list"></div>`;
+  const list = el("all-tracks-list");
+  const tracks = await api.getAllTracks(musicSectionKey);
+  tracks.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.dataset.ratingKey = track.ratingKey;
+    row.innerHTML = `
+      <div class="idx">♪</div>
+      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+    `;
+    row.onclick = () => playQueue(tracks, i);
+    list.appendChild(row);
+  });
+}
+
+async function showFolder() {
+  switchView("folder");
+  const current = folderStack[folderStack.length - 1];
+  const container = el("view-folder");
+  const canGoBack = folderStack.length > 1;
+  container.innerHTML = `
+    ${canGoBack ? `<button class="back-btn" id="folder-back">&larr; Back</button>` : ""}
+    <div class="section-heading">${current.label}</div>
+    <div id="folder-rows"></div>
+  `;
+  if (canGoBack) {
+    el("folder-back").onclick = () => {
+      folderStack.pop();
+      showFolder();
+    };
+  }
+  const rows = el("folder-rows");
+  const items = await api.getFolder(musicSectionKey, current.parentId);
+  const tracks = items.filter(i => i.type === "track");
+
+  items.forEach(item => {
+    if (item.type === "track") {
+      const idx = tracks.indexOf(item);
+      const row = document.createElement("div");
+      row.className = "track-row";
+      row.dataset.ratingKey = item.ratingKey;
+      row.innerHTML = `
+        <div class="idx">♪</div>
+        <div class="title">${item.title}</div>
+        <div class="dur">${fmtDuration(item.duration)}</div>
+      `;
+      row.onclick = () => playQueue(tracks, idx);
+      rows.appendChild(row);
+    } else {
+      const match = (item.key || "").match(/parent=(\d+)/);
+      const parentId = match ? match[1] : null;
+      rows.appendChild(renderSimpleRow(item.title, "", () => {
+        folderStack.push({ parentId, label: item.title });
+        showFolder();
+      }));
+    }
+  });
+}
+
 async function showSearchResults(query) {
   switchView("search");
   const container = el("view-search");
@@ -544,9 +725,30 @@ audio.addEventListener("pause", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
 });
 
+// Fetches more tracks to keep an endless "radio" queue going once the
+// current queue runs out — sonically-similar tracks to whatever just played
+// if Plex's analysis has data for it, falling back to a random sample of
+// the library so radio mode never just silently dies.
+async function extendRadioQueue() {
+  const lastTrack = queue[order[order.length - 1]];
+  if (!lastTrack) return [];
+  try {
+    const similar = await api.getSonicallySimilar(lastTrack.ratingKey, 20);
+    const fresh = similar.filter(t => !queue.some(q => q.ratingKey === t.ratingKey));
+    if (fresh.length) return fresh;
+  } catch (e) { /* fall through to the random fallback below */ }
+  try {
+    const all = await api.getAllTracks(musicSectionKey);
+    const fresh = all.filter(t => !queue.some(q => q.ratingKey === t.ratingKey));
+    return shuffleArray(fresh).slice(0, 20);
+  } catch (e) {
+    return [];
+  }
+}
+
 // `auto` is true when called from the "ended" event (respects repeat-one);
 // manual skips via the next button always move forward regardless of it.
-function advance(auto) {
+async function advance(auto) {
   if (auto && repeatMode === "one") {
     audio.currentTime = 0;
     audio.play().catch(() => {});
@@ -558,6 +760,21 @@ function advance(auto) {
   } else if (repeatMode === "all") {
     orderPos = 0;
     playCurrent();
+  } else if (radioOn) {
+    const more = await extendRadioQueue();
+    if (more.length) {
+      const startIndex = queue.length;
+      queue = queue.concat(more);
+      const newIndices = more.map((_, i) => startIndex + i);
+      order = order.concat(newIndices);
+      orderPos++;
+      playCurrent();
+      showToast("📡 Radio: playing similar tracks");
+    } else {
+      showToast("📡 Radio ran out of tracks to suggest");
+      setPlayIcon(false);
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    }
   } else {
     setPlayIcon(false);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
@@ -602,12 +819,20 @@ function cycleRepeat() {
   updateShuffleRepeatUI();
 }
 
+function toggleRadio() {
+  radioOn = !radioOn;
+  store.radioMode = radioOn;
+  updateShuffleRepeatUI();
+  if (radioOn) showToast("📡 Radio mode on — keeps playing similar tracks");
+}
+
 function updateShuffleRepeatUI() {
   [el("np-shuffle"), el("fs-shuffle")].forEach(btn => btn.classList.toggle("active", shuffleOn));
   [el("np-repeat"), el("fs-repeat")].forEach(btn => {
     btn.classList.toggle("active", repeatMode !== "off");
     btn.classList.toggle("repeat-one", repeatMode === "one");
   });
+  [el("np-radio"), el("fs-radio")].forEach(btn => btn.classList.toggle("active", radioOn));
 }
 
 function openNowPlayingFull() { el("now-playing-full").classList.remove("hidden"); }
@@ -618,6 +843,7 @@ el("np-next").onclick = () => advance(false);
 el("np-prev").onclick = prevTrack;
 el("np-shuffle").onclick = () => setShuffle(!shuffleOn);
 el("np-repeat").onclick = cycleRepeat;
+el("np-radio").onclick = toggleRadio;
 el("np-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
@@ -636,6 +862,7 @@ el("fs-next").onclick = () => advance(false);
 el("fs-prev").onclick = prevTrack;
 el("fs-shuffle").onclick = () => setShuffle(!shuffleOn);
 el("fs-repeat").onclick = cycleRepeat;
+el("fs-radio").onclick = toggleRadio;
 el("fs-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
@@ -674,6 +901,7 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
     if (view === "artists") showArtists();
     if (view === "albums") showAlbums();
     if (view === "playlists") showPlaylists();
+    if (view === "library") showLibrary();
     closeSidebar();
   };
 });

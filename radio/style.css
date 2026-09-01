@@ -254,6 +254,21 @@ button {
 .track-row .idx { color: var(--text-dim); text-align: right; }
 .track-row .dur { color: var(--text-dim); font-size: 0.85em; }
 
+/* Simple text rows — Library index, tag lists (genres/styles/moods/labels/folders) */
+.simple-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9em 0.6em;
+  border-radius: 6px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.simple-row:hover { background: var(--bg-raised); }
+.simple-row .row-title { font-size: 1em; }
+.simple-row .row-sub { color: var(--text-dim); font-size: 0.85em; }
+.simple-row .row-chevron { color: var(--text-dim); font-size: 1.1em; margin-left: 1em; }
+
 .back-btn {
   background: none;
   border: none;

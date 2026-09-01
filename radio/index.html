@@ -37,6 +37,7 @@
       <button class="nav-btn" data-view="artists">Artists</button>
       <button class="nav-btn" data-view="albums">Albums</button>
       <button class="nav-btn" data-view="playlists">Playlists</button>
+      <button class="nav-btn" data-view="library">Library</button>
     </nav>
     <div class="search-box">
       <input id="search-input" type="search" placeholder="Search library…">
@@ -53,6 +54,11 @@
     <div id="view-album-detail" class="view hidden"></div>
     <div id="view-playlists" class="view hidden"></div>
     <div id="view-playlist-detail" class="view hidden"></div>
+    <div id="view-library" class="view hidden"></div>
+    <div id="view-tag-list" class="view hidden"></div>
+    <div id="view-tag-detail" class="view hidden"></div>
+    <div id="view-all-tracks" class="view hidden"></div>
+    <div id="view-folder" class="view hidden"></div>
     <div id="view-search" class="view hidden"></div>
   </main>
 
@@ -70,6 +76,7 @@
       <button id="np-play" title="Play/Pause">▶</button>
       <button id="np-next" title="Next">⏭</button>
       <button id="np-repeat" class="control-toggle" title="Repeat">🔁</button>
+      <button id="np-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
     </div>
     <div class="np-progress">
       <span id="np-time-current">0:00</span>
@@ -109,6 +116,7 @@
     <button id="fs-play" title="Play/Pause">▶</button>
     <button id="fs-next" title="Next">⏭</button>
     <button id="fs-repeat" class="control-toggle" title="Repeat">🔁</button>
+    <button id="fs-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
   </div>
 </div>
 
