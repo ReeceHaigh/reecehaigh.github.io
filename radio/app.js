@@ -117,6 +117,13 @@ class PlexAPI {
     return data.MediaContainer;
   }
 
+  async getRawText(path) {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`);
+    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    return res.text();
+  }
+
   thumbUrl(thumbPath, size = 300) {
     if (!thumbPath) return "";
     const url = encodeURIComponent(thumbPath);
@@ -399,8 +406,10 @@ async function showAlbum(album) {
       <div class="idx">${track.index || i + 1}</div>
       <div class="title">${track.title}</div>
       <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
     `;
     row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
     list.appendChild(row);
   });
 }
@@ -440,8 +449,10 @@ async function showPlaylistDetail(playlist) {
       <div class="idx">${i + 1}</div>
       <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
     `;
     row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
     list.appendChild(row);
   });
 }
@@ -539,8 +550,10 @@ async function showAllTracks() {
       <div class="idx">♪</div>
       <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
     `;
     row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
     list.appendChild(row);
   });
 }
@@ -575,8 +588,10 @@ async function showFolder() {
         <div class="idx">♪</div>
         <div class="title">${item.title}</div>
         <div class="dur">${fmtDuration(item.duration)}</div>
+        <button class="add-to-queue-btn" title="Add to queue">+</button>
       `;
       row.onclick = () => playQueue(tracks, idx);
+      wireAddToQueueButton(row, item);
       rows.appendChild(row);
     } else {
       const match = (item.key || "").match(/parent=(\d+)/);
@@ -602,8 +617,10 @@ async function showSearchResults(query) {
       <div class="idx">♪</div>
       <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
     `;
     row.onclick = () => playQueue(results, i);
+    wireAddToQueueButton(row, track);
     list.appendChild(row);
   });
 }
@@ -673,6 +690,190 @@ function syncNowPlayingUI(track) {
 
   setPlayIcon(true);
   updateMediaSessionMetadata(track, artUrlLarge);
+  loadLyricsForTrack(track);
+  refreshQueueViewIfOpen();
+}
+
+// ---------- Lyrics ----------
+
+let currentLyrics = null;   // [{time, text}] for whichever track last loaded successfully
+let lastLyricsTrackKey = null;
+let lastLyricsLineIndex = -1;
+
+function findLyricsStreamKey(track) {
+  const stream = track.Media?.[0]?.Part?.[0]?.Stream?.find(s => s.format === "lrc" || s.codec === "lrc");
+  return stream?.key || null;
+}
+
+function parseLRC(text) {
+  const lines = text.split("\n");
+  const timeRe = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+  const result = [];
+  for (const line of lines) {
+    const matches = [...line.matchAll(timeRe)];
+    if (!matches.length) continue; // metadata header lines like [au:...] have no numeric time
+    const lyricText = line.replace(timeRe, "").trim();
+    for (const m of matches) {
+      result.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: lyricText });
+    }
+  }
+  return result.sort((a, b) => a.time - b.time);
+}
+
+async function loadLyricsForTrack(track) {
+  lastLyricsTrackKey = track.ratingKey;
+  currentLyrics = null;
+  lastLyricsLineIndex = -1;
+  el("fs-lyrics-toggle").classList.add("hidden");
+  el("fs-lyrics-lines").innerHTML = "";
+
+  const streamKey = findLyricsStreamKey(track);
+  if (!streamKey) {
+    if (fsViewMode === "lyrics") showFsView("now-playing");
+    return;
+  }
+  try {
+    const text = await api.getRawText(streamKey);
+    if (lastLyricsTrackKey !== track.ratingKey) return; // track changed again while this was in flight
+    currentLyrics = parseLRC(text);
+    el("fs-lyrics-toggle").classList.remove("hidden");
+    renderLyricsLines();
+  } catch (e) {
+    currentLyrics = null;
+  }
+}
+
+function renderLyricsLines() {
+  const container = el("fs-lyrics-lines");
+  container.innerHTML = "";
+  if (!currentLyrics || !currentLyrics.length) {
+    container.innerHTML = `<p style="color:var(--text-dim); text-align:center;">No lyrics for this track.</p>`;
+    return;
+  }
+  currentLyrics.forEach(line => {
+    const div = document.createElement("div");
+    div.className = "lyrics-line";
+    div.textContent = line.text || "♪";
+    container.appendChild(div);
+  });
+}
+
+function updateLyricsHighlight() {
+  if (!currentLyrics || !currentLyrics.length || fsViewMode !== "lyrics") return;
+  const t = audio.currentTime;
+  let idx = -1;
+  for (let i = 0; i < currentLyrics.length; i++) {
+    if (currentLyrics[i].time <= t) idx = i; else break;
+  }
+  if (idx === lastLyricsLineIndex) return;
+  lastLyricsLineIndex = idx;
+  const lines = el("fs-lyrics-lines").children;
+  for (let i = 0; i < lines.length; i++) lines[i].classList.toggle("current", i === idx);
+  if (idx >= 0 && lines[idx]) lines[idx].scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+// ---------- Full-screen view modes: now-playing / lyrics / queue ----------
+
+let fsViewMode = "now-playing";
+
+function showFsView(mode) {
+  fsViewMode = mode;
+  el("fs-main-view").classList.toggle("hidden", mode !== "now-playing");
+  el("fs-lyrics-view").classList.toggle("hidden", mode !== "lyrics");
+  el("fs-queue-view").classList.toggle("hidden", mode !== "queue");
+  el("fs-lyrics-toggle").classList.toggle("active", mode === "lyrics");
+  el("fs-queue-toggle").classList.toggle("active", mode === "queue");
+  if (mode === "lyrics") { lastLyricsLineIndex = -1; updateLyricsHighlight(); }
+  if (mode === "queue") renderQueueView();
+}
+
+// ---------- Queue management ----------
+
+function addToQueue(track) {
+  queue.push(track);
+  order.push(queue.length - 1);
+  showToast(`Added "${track.title}" to queue`);
+  refreshQueueViewIfOpen();
+}
+
+function wireAddToQueueButton(row, track) {
+  const btn = row.querySelector(".add-to-queue-btn");
+  if (btn) btn.onclick = (e) => { e.stopPropagation(); addToQueue(track); };
+}
+
+function refreshQueueViewIfOpen() {
+  if (fsViewMode === "queue") renderQueueView();
+}
+
+function jumpToQueuePosition(pos) {
+  orderPos = pos;
+  playCurrent();
+}
+
+function moveQueueItem(pos, direction) {
+  const target = pos + direction;
+  if (target <= orderPos || target >= order.length) return;
+  [order[pos], order[target]] = [order[target], order[pos]];
+  renderQueueView();
+}
+
+function removeQueueItem(pos) {
+  if (pos <= orderPos) return;
+  order.splice(pos, 1);
+  renderQueueView();
+}
+
+function renderQueueView() {
+  const list = el("fs-queue-list");
+  list.innerHTML = "";
+  if (!order.length) {
+    list.innerHTML = `<p style="color:var(--text-dim); text-align:center; padding-top:1em;">Queue is empty.</p>`;
+    return;
+  }
+
+  let sectionShown = { played: false, upNext: false };
+  order.forEach((queueIdx, pos) => {
+    if (pos < orderPos && !sectionShown.played) {
+      sectionShown.played = true;
+      const h = document.createElement("div");
+      h.className = "queue-section-heading";
+      h.textContent = "Played";
+      list.appendChild(h);
+    }
+    if (pos === orderPos) {
+      const h = document.createElement("div");
+      h.className = "queue-section-heading";
+      h.textContent = "Now Playing";
+      list.appendChild(h);
+    }
+    if (pos === orderPos + 1) {
+      const h = document.createElement("div");
+      h.className = "queue-section-heading";
+      h.textContent = "Up Next";
+      list.appendChild(h);
+    }
+
+    const track = queue[queueIdx];
+    const row = document.createElement("div");
+    row.className = "queue-row" + (pos === orderPos ? " current" : "");
+    const canEdit = pos > orderPos;
+    row.innerHTML = `
+      <div class="queue-row-main">
+        <div class="queue-row-title">${track.title}</div>
+        <div class="queue-row-sub">${track.grandparentTitle || ""}</div>
+      </div>
+      <div class="queue-row-actions">
+        ${canEdit ? `<button class="q-up" title="Move up">▲</button><button class="q-down" title="Move down">▼</button><button class="q-remove" title="Remove">✕</button>` : ""}
+      </div>
+    `;
+    row.querySelector(".queue-row-main").onclick = () => jumpToQueuePosition(pos);
+    if (canEdit) {
+      row.querySelector(".q-up").onclick = () => moveQueueItem(pos, -1);
+      row.querySelector(".q-down").onclick = () => moveQueueItem(pos, 1);
+      row.querySelector(".q-remove").onclick = () => removeQueueItem(pos);
+    }
+    list.appendChild(row);
+  });
 }
 
 audio.addEventListener("error", () => {
@@ -713,6 +914,8 @@ audio.addEventListener("timeupdate", () => {
       api.reportScrobble(track.ratingKey);
     }
   }
+
+  updateLyricsHighlight();
 });
 
 audio.addEventListener("ended", () => advance(true));
@@ -867,6 +1070,8 @@ el("fs-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
 el("fs-collapse").onclick = closeNowPlayingFull;
+el("fs-lyrics-toggle").onclick = () => showFsView(fsViewMode === "lyrics" ? "now-playing" : "lyrics");
+el("fs-queue-toggle").onclick = () => showFsView(fsViewMode === "queue" ? "now-playing" : "queue");
 
 updateShuffleRepeatUI();
 

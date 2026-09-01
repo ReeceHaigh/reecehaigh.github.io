@@ -94,14 +94,25 @@
   <div class="fs-header">
     <button id="fs-collapse" aria-label="Collapse">⌄</button>
     <div class="fs-header-title">Now Playing</div>
-    <span></span>
+    <div class="fs-header-actions">
+      <button id="fs-lyrics-toggle" class="fs-header-btn hidden" title="Lyrics">Lyrics</button>
+      <button id="fs-queue-toggle" class="fs-header-btn" title="Queue">Queue</button>
+    </div>
   </div>
-  <div class="fs-art-wrap">
-    <img id="fs-art" src="" alt="">
+  <div id="fs-main-view">
+    <div class="fs-art-wrap">
+      <img id="fs-art" src="" alt="">
+    </div>
+    <div class="fs-meta">
+      <div id="fs-title">Nothing playing</div>
+      <div id="fs-artist"></div>
+    </div>
   </div>
-  <div class="fs-meta">
-    <div id="fs-title">Nothing playing</div>
-    <div id="fs-artist"></div>
+  <div id="fs-lyrics-view" class="hidden">
+    <div id="fs-lyrics-lines"></div>
+  </div>
+  <div id="fs-queue-view" class="hidden">
+    <div id="fs-queue-list"></div>
   </div>
   <div class="fs-progress">
     <input id="fs-seek" type="range" min="0" max="100" value="0">
