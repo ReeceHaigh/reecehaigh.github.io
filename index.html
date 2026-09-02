@@ -1,71 +1,254 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reece Haigh</title>
+<meta name="description" content="Reece Haigh — personal site and projects.">
+<link rel="icon" href="/favicon.ico">
 <style>
-body, html {
-  height: 100%;
-  margin: 0;
-}
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --border: #262b33;
+    --text: #f2f3f5;
+    --muted: #9aa2ad;
+    --accent: #6ee7b7;
+  }
 
-.bgimg {
-  background-image: url('/assets/images/forestbridge.jpg');
-  height: 100%;
-  background-position: center;
-  background-size: cover;
-  position: relative;
-  color: white;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 25px;
-}
+  * { box-sizing: border-box; }
 
-.topleft {
-  position: absolute;
-  top: 0;
-  left: 16px;
-}
+  html { scroll-behavior: smooth; }
 
-.bottomleft {
-  position: absolute;
-  bottom: 0;
-  left: 16px;
-}
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
 
-.bottomright {
-  position: absolute;
-  bottom: 0;
-  right: 16px;
-}
+  a { color: inherit; }
 
-.middle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-}
+  .wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
 
-hr {
-  margin: auto;
-  width: 40%;
-}
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    min-height: 88vh;
+    display: flex;
+    align-items: flex-end;
+    background-image: linear-gradient(180deg, rgba(6,8,10,.35) 0%, rgba(6,8,10,.75) 100%), url('/assets/images/forestbridge.jpg');
+    background-size: cover;
+    background-position: center;
+  }
+
+  .hero-inner {
+    width: 100%;
+    padding-bottom: 64px;
+  }
+
+  .eyebrow {
+    display: inline-block;
+    font-size: 13px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  h1.name {
+    margin: 0 0 8px;
+    font-size: clamp(36px, 7vw, 64px);
+    line-height: 1.05;
+    font-weight: 700;
+  }
+
+  .tagline {
+    margin: 0 0 28px;
+    max-width: 46ch;
+    color: #e4e6ea;
+    font-size: clamp(16px, 2.4vw, 19px);
+  }
+
+  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 15px;
+    border: 1px solid transparent;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
+  }
+
+  .btn:hover { transform: translateY(-2px); }
+
+  .btn-primary { background: var(--accent); color: #06251b; }
+  .btn-primary:hover { background: #86f0c4; }
+
+  .btn-ghost { background: rgba(255,255,255,.06); color: var(--text); border-color: rgba(255,255,255,.25); backdrop-filter: blur(4px); }
+  .btn-ghost:hover { border-color: rgba(255,255,255,.5); }
+
+  /* ---- Sections ---- */
+  section { padding: 72px 0; }
+
+  h2.section-title {
+    font-size: 13px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 24px;
+  }
+
+  .about p { max-width: 60ch; color: #d7dade; font-size: 17px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    display: block;
+    padding: 24px;
+    border-radius: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    text-decoration: none;
+    transition: border-color .15s ease, transform .15s ease;
+  }
+
+  .card:hover { border-color: var(--accent); transform: translateY(-3px); }
+
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 19px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #06251b;
+    background: var(--accent);
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 4px;
+  }
+
+  .more-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .more-list a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 14.5px;
+    border-bottom: 1px dotted transparent;
+  }
+
+  .more-list a:hover { color: var(--text); border-bottom-color: var(--text); }
+
+  /* ---- Footer ---- */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 0;
+  }
+
+  .footer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  .wcg { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .wcg img { display: block; }
+
+  .copyright { color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 560px) {
+    .hero { min-height: 78vh; }
+    .footer-row { flex-direction: column; align-items: flex-start; }
+  }
 </style>
+</head>
 <body>
 
-<div class="bgimg">
-  <div class="topleft">
-    <p>reecehaigh.com</p>
+  <div class="hero">
+    <div class="wrap hero-inner">
+      <span class="eyebrow">reecehaigh.com</span>
+      <h1 class="name">Hi, I'm Reece &#128075;</h1>
+      <p class="tagline">I build small web things for fun — a self-hosted radio player, browser toys, and whatever else I'm tinkering with this week.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#projects">See what I've made</a>
+        <a class="btn btn-ghost" href="https://docs.google.com/forms/d/e/1FAIpQLSe7Mr6SjwVwAm-2aYAWII3HgzW2SLXVkrlNwrzbMGSltGF33w/viewform?usp=sf_link" target="_blank" rel="noopener">Get in touch</a>
+      </div>
+    </div>
   </div>
-  <div class="middle">
-    <h1>Hi There &#128075;</h1>
-    <hr>
-    <p><a href="https://docs.google.com/forms/d/e/1FAIpQLSe7Mr6SjwVwAm-2aYAWII3HgzW2SLXVkrlNwrzbMGSltGF33w/viewform?usp=sf_link" target="_blank" style="background-color:#ffffff">Contact Form</a></p>
-  </div>
-  <div class="bottomleft">
-    <p><iframe src="https://www.worldcommunitygrid.org/getDynamicImage.do?memberName=reecehaigh&mnOn=true&stat=1&imageNum=2&rankOn=true&projectsOn=true&special=true&link=1&memberId=859755" frameborder="0" name="di" scrolling="no" width="450px" height="190px"></iframe></p>
-  </div>
-   <div class="bottomright">
-    <p><img src="https://wcg.codegibbons.uk/sigs/reecehaigh.png" alt="World Community Grid Team"></p>
-  </div>
-</div>
 
+  <div class="wrap">
+
+    <section id="projects">
+      <h2 class="section-title">Projects</h2>
+      <div class="grid">
+        <a class="card" href="/radio/">
+          <h3>Radio <span class="tag">PWA</span></h3>
+          <p>A self-hosted internet radio player — station library, playlists, synced lyrics and Plex scrobbling. Installable on your phone or desktop.</p>
+        </a>
+        <a class="card" href="/black-screen/">
+          <h3>Black Screen</h3>
+          <p>A tiny fullscreen tool for cleaning dust and fingerprints off your monitor. Does exactly one thing.</p>
+        </a>
+      </div>
+    </section>
+
+    <section id="more">
+      <h2 class="section-title">Also on this site</h2>
+      <ul class="more-list">
+        <li><a href="/top40.html">Top 40 live stream</a></li>
+        <li><a href="/hrp.html">Hits Radio Pride</a></li>
+        <li><a href="/countdown.html">Countdown</a></li>
+      </ul>
+    </section>
+
+  </div>
+
+  <footer>
+    <div class="wrap footer-row">
+      <div class="wcg">
+        <iframe src="https://www.worldcommunitygrid.org/getDynamicImage.do?memberName=reecehaigh&mnOn=true&stat=1&imageNum=2&rankOn=true&projectsOn=true&special=true&link=1&memberId=859755" frameborder="0" name="di" scrolling="no" width="300" height="127" style="max-width:100%"></iframe>
+        <img src="https://wcg.codegibbons.uk/sigs/reecehaigh.png" alt="World Community Grid Team" style="max-width:100%">
+      </div>
+      <p class="copyright">&copy; <span id="year"></span> Reece Haigh</p>
+    </div>
+  </footer>
+
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
 </body>
 </html>
