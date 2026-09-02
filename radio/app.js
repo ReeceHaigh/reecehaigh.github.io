@@ -249,7 +249,13 @@ async function discoverServer(token) {
     }
   }
   console.warn("Plex server discovery failed for these connections:", failures);
-  throw new Error(`Could not reach any Plex server (${failures.length} attempted — see console for details)`);
+  const err = new Error(
+    servers.length
+      ? `Could not reach any Plex server (${failures.length} attempted)`
+      : "Your Plex account has no shared servers — check the share invite was accepted"
+  );
+  err.details = failures;
+  throw err;
 }
 
 // ---------- App state ----------
@@ -1209,14 +1215,22 @@ async function boot() {
   } catch (err) {
     console.error(err);
     store.server = null;
-    showLogin(err.message);
+    showLogin(err.message, err.details);
   }
 }
 
-function showLogin(message) {
+function showLogin(message, details) {
   el("app").classList.add("hidden");
   el("login-screen").classList.remove("hidden");
   if (message) el("login-status").textContent = message;
+  const detailsEl = el("login-details");
+  if (details && details.length) {
+    detailsEl.textContent = details.join("\n");
+    detailsEl.classList.remove("hidden");
+  } else {
+    detailsEl.textContent = "";
+    detailsEl.classList.add("hidden");
+  }
 }
 
 el("login-btn").onclick = async () => {

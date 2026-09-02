@@ -43,7 +43,10 @@ button {
 .login-box {
   text-align: center;
   max-width: 320px;
+  width: 100%;
+  padding: 0 1.5em;
 }
+.login-box:has(.login-details:not(.hidden)) { max-width: 440px; }
 .login-box h1 {
   color: var(--accent);
   letter-spacing: 0.05em;
@@ -59,6 +62,20 @@ button {
 }
 #login-btn:hover { background: #f5b423; }
 .status { color: var(--text-dim); font-size: 0.85em; min-height: 1.2em; }
+.login-details {
+  text-align: left;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.7em 0.9em;
+  margin-top: 1em;
+  font-size: 0.72em;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 40vh;
+  overflow-y: auto;
+}
 
 /* App layout */
 #app {
