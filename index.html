@@ -181,14 +181,11 @@
 
   .footer-row {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
     flex-wrap: wrap;
     gap: 20px;
   }
-
-  .wcg { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .wcg img { display: block; }
 
   .copyright { color: var(--muted); font-size: 13px; }
 
@@ -225,6 +222,10 @@
           <h3>Black Screen</h3>
           <p>A tiny fullscreen tool for cleaning dust and fingerprints off your monitor. Does exactly one thing.</p>
         </a>
+        <a class="card" href="https://github.com/ReeceHaigh/reecehaigh.github.io" target="_blank" rel="noopener">
+          <h3>This Site <span class="tag">Claude Code</span></h3>
+          <p>Built and shipped end-to-end with Claude Code — prompted, reviewed and pushed straight from chat. Commit history's public if you want to see how. (Hi, recruiters.)</p>
+        </a>
       </div>
     </section>
 
@@ -241,14 +242,68 @@
 
   <footer>
     <div class="wrap footer-row">
-      <div class="wcg">
-        <iframe src="https://www.worldcommunitygrid.org/getDynamicImage.do?memberName=reecehaigh&mnOn=true&stat=1&imageNum=2&rankOn=true&projectsOn=true&special=true&link=1&memberId=859755" frameborder="0" name="di" scrolling="no" width="300" height="127" style="max-width:100%"></iframe>
-        <img src="https://wcg.codegibbons.uk/sigs/reecehaigh.png" alt="World Community Grid Team" style="max-width:100%">
-      </div>
       <p class="copyright">&copy; <span id="year"></span> Reece Haigh</p>
     </div>
   </footer>
 
-  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    console.log('%c👋 hey', 'font-size:22px;font-weight:700;color:#6ee7b7');
+    console.log('%cLooking at the source? This whole site (git history included) is at github.com/ReeceHaigh/reecehaigh.github.io — built with Claude Code. There\'s also a Konami code on this page, for what it\'s worth.', 'font-size:13px;color:#9aa2ad');
+
+    // Easter egg: Konami code
+    (function () {
+      var seq = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+      var pos = 0;
+      window.addEventListener('keydown', function (e) {
+        pos = (e.key === seq[pos]) ? pos + 1 : 0;
+        if (pos === seq.length) { pos = 0; launchEasterEgg(); }
+      });
+
+      function launchEasterEgg() {
+        var toast = document.createElement('div');
+        toast.textContent = 'You found it. 🎉 Now go build something.';
+        toast.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;' +
+          'background:#14171c;border:1px solid #6ee7b7;color:#6ee7b7;padding:10px 18px;border-radius:999px;' +
+          'font:600 14px -apple-system,BlinkMacSystemFont,sans-serif;opacity:0;transition:opacity .4s ease;pointer-events:none';
+        document.body.appendChild(toast);
+        requestAnimationFrame(function () { toast.style.opacity = '1'; });
+        setTimeout(function () {
+          toast.style.opacity = '0';
+          setTimeout(function () { toast.remove(); }, 500);
+        }, 4000);
+
+        var canvas = document.createElement('canvas');
+        canvas.style.cssText = 'position:fixed;inset:0;z-index:9999;pointer-events:none';
+        document.body.appendChild(canvas);
+        var ctx = canvas.getContext('2d');
+        var w = canvas.width = window.innerWidth;
+        var h = canvas.height = window.innerHeight;
+        var fontSize = 16;
+        var cols = Math.floor(w / fontSize);
+        var drops = new Array(cols).fill(0);
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ01</>{}';
+        var frame = 0;
+        var maxFrames = 260;
+        var id = setInterval(function () {
+          ctx.fillStyle = 'rgba(11,13,16,0.15)';
+          ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = '#6ee7b7';
+          ctx.font = fontSize + 'px monospace';
+          drops.forEach(function (y, i) {
+            var char = chars[Math.floor(Math.random() * chars.length)];
+            ctx.fillText(char, i * fontSize, y * fontSize);
+            drops[i] = (y * fontSize > h && Math.random() > 0.975) ? 0 : y + 1;
+          });
+          frame++;
+          if (frame > maxFrames) {
+            clearInterval(id);
+            canvas.remove();
+          }
+        }, 40);
+      }
+    })();
+  </script>
 </body>
 </html>
