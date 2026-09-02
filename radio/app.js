@@ -212,7 +212,29 @@ class PlexAPI {
 
 // ---------- Server discovery ----------
 
-async function discoverServer(token) {
+// Plex re-picks which relay node a token gets assigned to on each fresh
+// /api/v2/resources lookup, and some relay nodes reject a token outright
+// (raw connection failure, not even a clean 401) — seen in practice for a
+// token from a share accepted only minutes earlier, while a long-established
+// token sails through the same node fine. Re-querying resources from scratch
+// a few times gives a real chance of landing on a relay node that accepts
+// this token, rather than giving up after whatever assignment came first.
+async function discoverServer(token, onAttempt) {
+  const attempts = 3;
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    if (onAttempt) onAttempt(i + 1, attempts);
+    try {
+      return await discoverServerOnce(token);
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr;
+}
+
+async function discoverServerOnce(token) {
   const res = await fetch("https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1", {
     headers: {
       Accept: "application/json",
@@ -1194,7 +1216,9 @@ async function boot() {
     // server.relay is only present on connections picked up after the relay-
     // avoidance fix — re-discover once for anyone with an older cached entry.
     if (!server || server.relay === undefined) {
-      server = await discoverServer(token);
+      server = await discoverServer(token, (attempt, total) => {
+        if (attempt > 1) showLogin(`Connecting to your server… (attempt ${attempt}/${total})`);
+      });
       store.server = server;
     }
     api = new PlexAPI(server.uri, token);
