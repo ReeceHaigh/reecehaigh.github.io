@@ -227,7 +227,23 @@ async function discoverServer(token) {
   // direct remote connection, and only fall back to Plex Relay last — relay
   // is bandwidth-capped and known to reset sustained streams like audio even
   // though it happily serves small metadata/image requests.
-  const connScore = (c) => c.local ? 0 : (c.relay ? 2 : 1);
+  //
+  // Plex running with `network_mode: host` alongside other Docker projects
+  // sees every bridge network gateway on the host too, and reports each one
+  // to plex.tv as a "local" connection candidate even though none are ever
+  // reachable from an actual LAN client — real home networks essentially
+  // never use 172.16.0.0/12, so treat matches there as noise, tried dead
+  // last rather than first.
+  const isLikelyDockerBridgeIP = (uri) => {
+    const m = uri.match(/https?:\/\/(\d+)-(\d+)-\d+-\d+\./);
+    if (!m) return false;
+    const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+    return a === 172 && b >= 16 && b <= 31;
+  };
+  const connScore = (c) => {
+    if (c.local && isLikelyDockerBridgeIP(c.uri)) return 3;
+    return c.local ? 0 : (c.relay ? 2 : 1);
+  };
 
   const failures = [];
   for (const server of servers) {
