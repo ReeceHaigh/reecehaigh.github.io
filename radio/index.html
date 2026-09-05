@@ -78,6 +78,7 @@
       <button id="np-next" title="Next">⏭</button>
       <button id="np-repeat" class="control-toggle" title="Repeat">🔁</button>
       <button id="np-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
+      <button id="np-crossfade" class="control-toggle" title="Crossfade — blend into the next track">🎚</button>
     </div>
     <div class="np-progress">
       <span id="np-time-current">0:00</span>
@@ -129,10 +130,12 @@
     <button id="fs-next" title="Next">⏭</button>
     <button id="fs-repeat" class="control-toggle" title="Repeat">🔁</button>
     <button id="fs-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
+    <button id="fs-crossfade" class="control-toggle" title="Crossfade — blend into the next track">🎚</button>
   </div>
 </div>
 
 <audio id="audio"></audio>
+<audio id="audio-b"></audio>
 <div id="toast" class="toast hidden"></div>
 
 <script src="app.js"></script>

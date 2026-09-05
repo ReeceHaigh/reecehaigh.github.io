@@ -49,6 +49,9 @@ const store = {
   set repeatMode(v) { localStorage.setItem("plex_repeat", v); },
   get radioMode() { return localStorage.getItem("plex_radio") === "1"; },
   set radioMode(v) { localStorage.setItem("plex_radio", v ? "1" : "0"); },
+  // Defaults on — most people want smooth transitions once the feature exists.
+  get crossfade() { return localStorage.getItem("plex_crossfade") !== "0"; },
+  set crossfade(v) { localStorage.setItem("plex_crossfade", v ? "1" : "0"); },
 };
 
 // ---------- Plex OAuth ----------
@@ -349,6 +352,7 @@ let shuffleOn = store.shuffle;
 let repeatMode = store.repeatMode; // "off" | "all" | "one"
 let scrobbledCurrent = false; // whether the current track has already been reported played to Plex
 let radioOn = store.radioMode;
+let crossfadeOn = store.crossfade;
 let folderStack = [{ parentId: null, label: "Folders" }];
 
 const LIBRARY_CATEGORIES = [
@@ -360,7 +364,24 @@ const LIBRARY_CATEGORIES = [
 ];
 
 const el = (id) => document.getElementById(id);
-const audio = el("audio");
+
+// Two <audio> elements so the next track can be preloaded — and, with
+// crossfade on, faded in — while the current one is still playing. `audio`
+// always points at whichever element is presently audible/current; `standby`
+// is the other one, used to buffer (and optionally fade in) the upcoming
+// track ahead of time. A hard-cut transition (manual skip, initial track
+// load) just reuses `audio` in place and clears out `standby`.
+const audioA = el("audio");
+const audioB = el("audio-b");
+audioA.preload = "auto";
+audioB.preload = "auto";
+let audio = audioA;
+let standby = audioB;
+let userVolume = 1;
+function setActiveElement(elx) {
+  audio = elx;
+  standby = elx === audioA ? audioB : audioA;
+}
 
 function formatTime(sec) {
   if (!isFinite(sec)) return "0:00";
@@ -737,11 +758,16 @@ function playQueue(tracks, index) {
 }
 
 function playCurrent() {
+  // Hard cut: reload the currently-active element in place and drop whatever
+  // was buffered in the standby element, since queue state just jumped
+  // (manual skip, track click, initial load) rather than progressing naturally.
+  abortTransition();
   const track = queue[order[orderPos]];
   if (!track) return;
   const part = track.Media?.[0]?.Part?.[0];
   if (!part) return;
 
+  audio.pause();
   audio.src = api.streamUrl(part);
   audio.play().catch(() => {});
   syncNowPlayingUI(track);
@@ -962,18 +988,212 @@ function renderQueueView() {
   });
 }
 
-audio.addEventListener("error", () => {
-  const track = queue[order[orderPos]];
-  if (!track) return;
-  if (audio.dataset.fallback === "1") return;
-  audio.dataset.fallback = "1";
-  audio.src = api.transcodeUrl(track);
-  audio.play().catch(() => {});
+// Transcode fallback applies to whichever element hit the error — including
+// the standby element while it's silently preloading the next track — so it
+// keys off e.target rather than the closed-over `audio` variable.
+function onAudioError(e) {
+  const el2 = e.target;
+  const track = el2 === audio ? queue[order[orderPos]] : (el2 === standby ? preloadedNextTrack : null);
+  if (!track || el2.dataset.fallback === "1") return;
+  el2.dataset.fallback = "1";
+  el2.src = api.transcodeUrl(track);
+  if (el2 === audio) el2.play().catch(() => {});
+}
+function onAudioLoadstart(e) { e.target.dataset.fallback = ""; }
+[audioA, audioB].forEach((elx) => {
+  elx.addEventListener("error", onAudioError);
+  elx.addEventListener("loadstart", onAudioLoadstart);
 });
 
-audio.addEventListener("loadstart", () => { audio.dataset.fallback = ""; });
+// ---------- Gapless / crossfade transition engine ----------
+//
+// `standby` is preloaded with the next track a little before the current one
+// finishes. With crossfade off, that just makes the automatic switch instant
+// (no re-fetch gap). With crossfade on, the last few seconds fade `audio`'s
+// volume down while ramping `standby`'s up, then the two elements swap roles.
 
-audio.addEventListener("timeupdate", () => {
+const CROSSFADE_SECONDS = 8;
+const PRELOAD_LEAD_SECONDS = 20;
+let preloadTriggered = false;
+let crossfadeTriggered = false;
+let radioExtendTriggered = false;
+let preloadedNextTrack = null;
+let crossfadeRAF = null;
+
+function resetTransitionState() {
+  preloadTriggered = false;
+  crossfadeTriggered = false;
+  radioExtendTriggered = false;
+  preloadedNextTrack = null;
+}
+
+function cancelCrossfade() {
+  if (crossfadeRAF != null) {
+    cancelAnimationFrame(crossfadeRAF);
+    crossfadeRAF = null;
+  }
+}
+
+// Stops any in-flight crossfade/preload and returns both elements to a clean
+// "audio is the only one that matters" state — used whenever queue state is
+// about to jump around outside the normal end-of-track flow (manual skip,
+// rewinding to the previous track, a fresh playQueue()).
+function abortTransition() {
+  cancelCrossfade();
+  audio.volume = userVolume;
+  standby.pause();
+  standby.removeAttribute("src");
+  standby.load();
+  resetTransitionState();
+}
+
+// What track plays right after the current one, without mutating any state
+// — null if the queue would just stop (or radio hasn't extended it yet).
+function peekNextTrack() {
+  if (orderPos < order.length - 1) return queue[order[orderPos + 1]];
+  if (repeatMode === "all" && order.length) return queue[order[0]];
+  return null;
+}
+
+// Mirrors extendRadioQueue's call site in advance(), but runs proactively —
+// before the current track ends — so a next track is already resolvable by
+// the time preloading/crossfading needs one.
+async function ensureRadioExtension() {
+  if (radioExtendTriggered) return;
+  if (!(radioOn && repeatMode !== "all" && orderPos === order.length - 1)) return;
+  radioExtendTriggered = true;
+  const more = await extendRadioQueue();
+  if (more.length) {
+    const startIndex = queue.length;
+    queue = queue.concat(more);
+    order = order.concat(more.map((_, i) => startIndex + i));
+    refreshQueueViewIfOpen();
+  }
+}
+
+async function prepareStandby() {
+  await ensureRadioExtension();
+  const next = peekNextTrack();
+  if (!next) return;
+  const part = next.Media?.[0]?.Part?.[0];
+  if (!part) return;
+  preloadedNextTrack = next;
+  standby.pause();
+  standby.currentTime = 0;
+  standby.volume = crossfadeOn ? 0 : userVolume;
+  standby.src = api.streamUrl(part);
+  standby.load();
+}
+
+// Advances queue state (orderPos, with all/off-repeat wraparound) to match
+// whatever peekNextTrack() already resolved, and resets the per-track
+// transition flags for the track that's now current.
+function advanceTransitionState() {
+  if (orderPos < order.length - 1) {
+    orderPos++;
+  } else if (repeatMode === "all") {
+    orderPos = 0;
+  }
+  resetTransitionState();
+}
+
+function completeSwap(oldEl) {
+  oldEl.pause();
+  oldEl.removeAttribute("src");
+  oldEl.load();
+  advanceTransitionState();
+  setActiveElement(oldEl === audioA ? audioB : audioA);
+  const track = queue[order[orderPos]];
+  syncNowPlayingUI(track);
+  highlightPlayingRow(track.ratingKey);
+  scrobbledCurrent = false;
+}
+
+function beginCrossfade(remaining) {
+  if (!preloadedNextTrack || !standby.src) return; // not ready — natural "ended" will fall back to a hard cut
+  const oldEl = audio;
+  const fadeSeconds = Math.min(CROSSFADE_SECONDS, Math.max(remaining, 0.5));
+  const startVol = oldEl.volume;
+  standby.currentTime = 0;
+  standby.volume = 0;
+  standby.play().catch(() => {});
+  const t0 = performance.now();
+  function tick(now) {
+    const p = Math.min(1, (now - t0) / (fadeSeconds * 1000));
+    oldEl.volume = startVol * (1 - p);
+    standby.volume = userVolume * p;
+    if (p < 1) {
+      crossfadeRAF = requestAnimationFrame(tick);
+    } else {
+      crossfadeRAF = null;
+      completeSwap(oldEl);
+    }
+  }
+  crossfadeRAF = requestAnimationFrame(tick);
+}
+
+function onActiveTimeUpdate() {
+  const track = queue[order[orderPos]];
+  const dur = (track?.duration ? track.duration / 1000 : audio.duration) || 0;
+  if (!dur || !isFinite(dur) || repeatMode === "one") return;
+  const remaining = dur - audio.currentTime;
+
+  if (!preloadTriggered && remaining <= PRELOAD_LEAD_SECONDS) {
+    preloadTriggered = true;
+    prepareStandby();
+  }
+  if (crossfadeOn && !crossfadeTriggered && remaining <= CROSSFADE_SECONDS) {
+    crossfadeTriggered = true;
+    beginCrossfade(remaining);
+  }
+}
+
+function onActiveEnded() {
+  cancelCrossfade();
+  if (repeatMode === "one") {
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+    return;
+  }
+  // If the next track is already buffered in standby (gapless preload, or
+  // crossfade that didn't get enough lead time to finish), swap to it
+  // instantly instead of re-fetching via playCurrent().
+  const next = peekNextTrack();
+  if (next && preloadedNextTrack && preloadedNextTrack.ratingKey === next.ratingKey) {
+    const oldEl = audio;
+    // Gapless (standby idle, not yet started): start it fresh. Crossfade cut
+    // short by the real media ending before the fade animation finished:
+    // standby's already mid-playback, so just bring it up to full volume
+    // rather than restarting it from zero.
+    if (standby.paused) standby.currentTime = 0;
+    standby.volume = userVolume;
+    standby.play().catch(() => {});
+    completeSwap(oldEl);
+    return;
+  }
+  advance(true);
+}
+
+[audioA, audioB].forEach((elx) => {
+  elx.addEventListener("ended", (e) => { if (e.target === audio) onActiveEnded(); });
+  elx.addEventListener("play", (e) => {
+    if (e.target !== audio) return;
+    setPlayIcon(true);
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+  });
+  elx.addEventListener("pause", (e) => {
+    if (e.target !== audio) return;
+    setPlayIcon(false);
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+  });
+});
+
+// Progress bar / lock-screen position, scrobbling, and lyrics all read off
+// whichever element is currently active. Also drives preloading and the
+// crossfade trigger via onActiveTimeUpdate.
+[audioA, audioB].forEach((elx) => elx.addEventListener("timeupdate", (e) => {
+  if (e.target !== audio) return;
+  onActiveTimeUpdate();
   if (!audio.duration) return;
   const pct = (audio.currentTime / audio.duration) * 100;
   el("np-seek").value = pct;
@@ -1002,17 +1222,7 @@ audio.addEventListener("timeupdate", () => {
   }
 
   updateLyricsHighlight();
-});
-
-audio.addEventListener("ended", () => advance(true));
-audio.addEventListener("play", () => {
-  setPlayIcon(true);
-  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
-});
-audio.addEventListener("pause", () => {
-  setPlayIcon(false);
-  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
-});
+}));
 
 // Fetches more tracks to keep an endless "radio" queue going once the
 // current queue runs out — sonically-similar tracks to whatever just played
@@ -1043,6 +1253,7 @@ async function advance(auto) {
     audio.play().catch(() => {});
     return;
   }
+  abortTransition();
   if (orderPos < order.length - 1) {
     orderPos++;
     playCurrent();
@@ -1072,6 +1283,7 @@ async function advance(auto) {
 
 function prevTrack() {
   if (audio.currentTime > 3) {
+    abortTransition();
     audio.currentTime = 0;
     return;
   }
@@ -1079,6 +1291,7 @@ function prevTrack() {
     orderPos--;
     playCurrent();
   } else {
+    abortTransition();
     audio.currentTime = 0;
   }
 }
@@ -1115,6 +1328,13 @@ function toggleRadio() {
   if (radioOn) showToast("📡 Radio mode on — keeps playing similar tracks");
 }
 
+function toggleCrossfade() {
+  crossfadeOn = !crossfadeOn;
+  store.crossfade = crossfadeOn;
+  updateShuffleRepeatUI();
+  showToast(crossfadeOn ? "🎚 Crossfade on" : "🎚 Crossfade off");
+}
+
 function updateShuffleRepeatUI() {
   [el("np-shuffle"), el("fs-shuffle")].forEach(btn => btn.classList.toggle("active", shuffleOn));
   [el("np-repeat"), el("fs-repeat")].forEach(btn => {
@@ -1122,6 +1342,7 @@ function updateShuffleRepeatUI() {
     btn.classList.toggle("repeat-one", repeatMode === "one");
   });
   [el("np-radio"), el("fs-radio")].forEach(btn => btn.classList.toggle("active", radioOn));
+  [el("np-crossfade"), el("fs-crossfade")].forEach(btn => btn.classList.toggle("active", crossfadeOn));
 }
 
 function openNowPlayingFull() { el("now-playing-full").classList.remove("hidden"); }
@@ -1133,10 +1354,14 @@ el("np-prev").onclick = prevTrack;
 el("np-shuffle").onclick = () => setShuffle(!shuffleOn);
 el("np-repeat").onclick = cycleRepeat;
 el("np-radio").onclick = toggleRadio;
+el("np-crossfade").onclick = toggleCrossfade;
 el("np-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
-el("np-volume").oninput = (e) => { audio.volume = e.target.value / 100; };
+el("np-volume").oninput = (e) => {
+  userVolume = e.target.value / 100;
+  audio.volume = userVolume;
+};
 
 // Tapping anywhere on the mini-player opens the full-screen view, except the
 // actual controls (buttons/sliders) — a much larger, more forgiving target
@@ -1152,6 +1377,7 @@ el("fs-prev").onclick = prevTrack;
 el("fs-shuffle").onclick = () => setShuffle(!shuffleOn);
 el("fs-repeat").onclick = cycleRepeat;
 el("fs-radio").onclick = toggleRadio;
+el("fs-crossfade").onclick = toggleCrossfade;
 el("fs-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
