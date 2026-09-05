@@ -52,6 +52,26 @@ const store = {
   // Defaults on — most people want smooth transitions once the feature exists.
   get crossfade() { return localStorage.getItem("plex_crossfade") !== "0"; },
   set crossfade(v) { localStorage.setItem("plex_crossfade", v ? "1" : "0"); },
+  get volume() {
+    const v = parseFloat(localStorage.getItem("plex_volume"));
+    return isFinite(v) ? v : 1;
+  },
+  set volume(v) { localStorage.setItem("plex_volume", String(v)); },
+  // The in-progress queue/track/position — restored on reopen so a killed
+  // background tab (very common for an iOS PWA) or a plain refresh doesn't
+  // throw away what was playing.
+  get playbackState() {
+    const raw = localStorage.getItem("plex_playback_state");
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  },
+  set playbackState(v) {
+    if (!v) { localStorage.removeItem("plex_playback_state"); return; }
+    // A big "All Tracks" queue serialized every few seconds can occasionally
+    // blow the localStorage quota — that's fine, resuming is a nice-to-have,
+    // not worth surfacing an error over.
+    try { localStorage.setItem("plex_playback_state", JSON.stringify(v)); } catch (e) { /* ignore */ }
+  },
 };
 
 // ---------- Plex OAuth ----------
@@ -377,7 +397,8 @@ audioA.preload = "auto";
 audioB.preload = "auto";
 let audio = audioA;
 let standby = audioB;
-let userVolume = 1;
+let userVolume = store.volume;
+audioA.volume = userVolume;
 function setActiveElement(elx) {
   audio = elx;
   standby = elx === audioA ? audioB : audioA;
@@ -773,6 +794,7 @@ function playCurrent() {
   syncNowPlayingUI(track);
   highlightPlayingRow(track.ratingKey);
   scrobbledCurrent = false;
+  savePlaybackState();
 }
 
 function highlightPlayingRow(ratingKey) {
@@ -906,6 +928,7 @@ function addToQueue(track) {
   order.push(queue.length - 1);
   showToast(`Added "${track.title}" to queue`);
   refreshQueueViewIfOpen();
+  savePlaybackState();
 }
 
 function wireAddToQueueButton(row, track) {
@@ -927,12 +950,14 @@ function moveQueueItem(pos, direction) {
   if (target <= orderPos || target >= order.length) return;
   [order[pos], order[target]] = [order[target], order[pos]];
   renderQueueView();
+  savePlaybackState();
 }
 
 function removeQueueItem(pos) {
   if (pos <= orderPos) return;
   order.splice(pos, 1);
   renderQueueView();
+  savePlaybackState();
 }
 
 function renderQueueView() {
@@ -1019,6 +1044,7 @@ let crossfadeTriggered = false;
 let radioExtendTriggered = false;
 let preloadedNextTrack = null;
 let crossfadeRAF = null;
+let lastPlaybackStateSave = 0;
 
 function resetTransitionState() {
   preloadTriggered = false;
@@ -1032,6 +1058,32 @@ function cancelCrossfade() {
     cancelAnimationFrame(crossfadeRAF);
     crossfadeRAF = null;
   }
+}
+
+// Persists the current queue/track/position so reopening the app (a plain
+// refresh, or the far more common case on iOS of the PWA tab getting killed
+// in the background) can pick up right where it left off, instead of
+// dropping the whole queue.
+function savePlaybackState() {
+  if (!queue.length || !order.length) return;
+  store.playbackState = { queue, order, orderPos, currentTime: audio.currentTime || 0 };
+}
+
+function restorePlaybackState() {
+  const saved = store.playbackState;
+  if (!saved || !saved.queue || !saved.queue.length) return;
+  queue = saved.queue;
+  order = Array.isArray(saved.order) && saved.order.length === queue.length ? saved.order : queue.map((_, i) => i);
+  orderPos = Math.min(Math.max(saved.orderPos || 0, 0), order.length - 1);
+  const track = queue[order[orderPos]];
+  const part = track?.Media?.[0]?.Part?.[0];
+  if (!part) return;
+
+  audio.src = api.streamUrl(part);
+  audio.addEventListener("loadedmetadata", () => { audio.currentTime = saved.currentTime || 0; }, { once: true });
+  syncNowPlayingUI(track);
+  highlightPlayingRow(track.ratingKey);
+  setPlayIcon(false); // stays paused until the user presses play — no autoplay on load
 }
 
 // Stops any in-flight crossfade/preload and returns both elements to a clean
@@ -1107,6 +1159,7 @@ function completeSwap(oldEl) {
   syncNowPlayingUI(track);
   highlightPlayingRow(track.ratingKey);
   scrobbledCurrent = false;
+  savePlaybackState();
 }
 
 function beginCrossfade(remaining) {
@@ -1185,6 +1238,7 @@ function onActiveEnded() {
     if (e.target !== audio) return;
     setPlayIcon(false);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    savePlaybackState();
   });
 });
 
@@ -1222,6 +1276,15 @@ function onActiveEnded() {
   }
 
   updateLyricsHighlight();
+
+  // Cheap enough to just throttle by wall-clock time rather than track a
+  // separate counter — keeps the saved resume position roughly current
+  // without hitting localStorage on every timeupdate tick.
+  const now = Date.now();
+  if (now - lastPlaybackStateSave > 5000) {
+    lastPlaybackStateSave = now;
+    savePlaybackState();
+  }
 }));
 
 // Fetches more tracks to keep an endless "radio" queue going once the
@@ -1358,10 +1421,14 @@ el("np-crossfade").onclick = toggleCrossfade;
 el("np-seek").oninput = (e) => {
   if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
 };
-el("np-volume").oninput = (e) => {
-  userVolume = e.target.value / 100;
+function setVolume(v) {
+  userVolume = Math.min(1, Math.max(0, v));
+  store.volume = userVolume;
   audio.volume = userVolume;
-};
+  el("np-volume").value = userVolume * 100;
+}
+el("np-volume").value = userVolume * 100;
+el("np-volume").oninput = (e) => setVolume(e.target.value / 100);
 
 // Tapping anywhere on the mini-player opens the full-screen view, except the
 // actual controls (buttons/sliders) — a much larger, more forgiving target
@@ -1466,12 +1533,53 @@ el("search-input").addEventListener("keydown", (e) => {
   }
 });
 
+// ---------- Keyboard shortcuts (desktop) ----------
+// Space play/pause, arrows seek ±5s (shift+arrow skips track), up/down for
+// volume — ignored while typing into the search box or any other field.
+document.addEventListener("keydown", (e) => {
+  const target = document.activeElement;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  switch (e.key) {
+    case " ":
+      e.preventDefault();
+      togglePlay();
+      break;
+    case "ArrowRight":
+      e.preventDefault();
+      if (e.shiftKey) advance(false);
+      else if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+      break;
+    case "ArrowLeft":
+      e.preventDefault();
+      if (e.shiftKey) prevTrack();
+      else audio.currentTime = Math.max(0, audio.currentTime - 5);
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      setVolume(userVolume + 0.05);
+      break;
+    case "ArrowDown":
+      e.preventDefault();
+      setVolume(userVolume - 0.05);
+      break;
+  }
+});
+
 el("logout-btn").onclick = () => {
   store.token = null;
   store.server = null;
   store.musicSectionKey = null;
+  store.playbackState = null;
   location.reload();
 };
+
+// iOS Safari rarely fires beforeunload when a PWA tab is backgrounded/killed
+// — visibilitychange is what actually catches that case in practice.
+window.addEventListener("beforeunload", savePlaybackState);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) savePlaybackState();
+});
 
 // ---------- Boot ----------
 
@@ -1526,6 +1634,7 @@ async function boot(isRetry = false) {
     el("login-screen").classList.add("hidden");
     el("app").classList.remove("hidden");
     showHome();
+    restorePlaybackState();
   } catch (err) {
     console.error(err);
     const hadCachedServer = !!store.server;
