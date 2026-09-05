@@ -240,56 +240,89 @@ async function discoverServerOnce(token) {
       Accept: "application/json",
       "X-Plex-Token": token,
       "X-Plex-Client-Identifier": store.clientId,
+      // Identify as a full client — plex.tv is more consistent about handing
+      // back the relay connection and the complete connection list when the
+      // request carries the same product/version as the sign-in call.
+      "X-Plex-Product": PRODUCT,
+      "X-Plex-Version": VERSION,
     },
   });
   const resources = await res.json();
   const servers = resources.filter(r => (r.provides || "").includes("server"));
 
-  // Prefer local LAN connections (fastest when on the home network), then a
-  // direct remote connection, and only fall back to Plex Relay last — relay
-  // is bandwidth-capped and known to reset sustained streams like audio even
-  // though it happily serves small metadata/image requests.
-  //
   // Plex running with `network_mode: host` alongside other Docker projects
-  // sees every bridge network gateway on the host too, and reports each one
-  // to plex.tv as a "local" connection candidate even though none are ever
-  // reachable from an actual LAN client — real home networks essentially
-  // never use 172.16.0.0/12, so treat matches there as noise, tried dead
-  // last rather than first.
-  const isLikelyDockerBridgeIP = (uri) => {
+  // reports every bridge-network gateway (172.16.0.0/12) to plex.tv as a
+  // "local" connection. None are ever reachable from a real client, and each
+  // dead address otherwise burns a full probe timeout — drop them outright.
+  const isDockerBridgeIP = (uri) => {
     const m = uri.match(/https?:\/\/(\d+)-(\d+)-\d+-\d+\./);
     if (!m) return false;
     const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
     return a === 172 && b >= 16 && b <= 31;
   };
-  const connScore = (c) => {
-    if (c.local && isLikelyDockerBridgeIP(c.uri)) return 3;
-    return c.local ? 0 : (c.relay ? 2 : 1);
+
+  // Priority tiers: LAN first (fastest at home), then a direct remote
+  // connection, then Plex Relay last — relay is bandwidth-capped and resets
+  // sustained audio streams, but it's the only path that works for a remote
+  // listener when the server has a dynamic public IP and no port forwarding.
+  // Relay nodes are also slow to first byte and rotate per lookup, so give
+  // them a longer timeout.
+  const tierOf = (c) => c.relay ? 2 : (c.local ? 0 : 1);
+  const timeoutFor = (c) => c.relay ? 12000 : 6000;
+
+  const probe = async (uri, ms) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const r = await fetch(`${uri}/identity?X-Plex-Token=${token}`, { signal: controller.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return true;
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   const failures = [];
   for (const server of servers) {
-    const conns = [...(server.connections || [])].sort((a, b) => connScore(a) - connScore(b));
-    for (const conn of conns) {
-      try {
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 6000);
-        const r = await fetch(`${conn.uri}/identity?X-Plex-Token=${token}`, { signal: controller.signal });
-        clearTimeout(t);
-        if (r.ok) {
-          console.log(`Plex: using ${conn.uri}`, { local: conn.local, relay: conn.relay });
-          return { name: server.name, uri: conn.uri, relay: !!conn.relay };
-        }
-        failures.push(`${conn.uri} → HTTP ${r.status}`);
-      } catch (e) {
-        failures.push(`${conn.uri} → ${e.message}`);
+    // De-dupe by URI and drop the Docker bridge noise before probing.
+    const seen = new Set();
+    const conns = (server.connections || []).filter((c) => {
+      if (!c.uri || seen.has(c.uri) || isDockerBridgeIP(c.uri)) return false;
+      seen.add(c.uri);
+      return true;
+    });
+    if (!conns.some((c) => c.relay)) {
+      failures.push(`${server.name} → plex.tv offered no relay connection for this token`);
+    }
+
+    // One tier at a time; every candidate in a tier is probed in parallel so
+    // a single dead address can't hold up a live one behind it.
+    for (const tier of [0, 1, 2]) {
+      const group = conns.filter((c) => tierOf(c) === tier);
+      if (!group.length) continue;
+      const results = await Promise.allSettled(
+        group.map((c) => probe(c.uri, timeoutFor(c)).then(() => c))
+      );
+      const hit = results.find((r) => r.status === "fulfilled");
+      if (hit) {
+        const c = hit.value;
+        console.log(`Plex: using ${c.uri}`, { local: !!c.local, relay: !!c.relay });
+        return { name: server.name, uri: c.uri, relay: !!c.relay };
       }
+      results.forEach((r, i) => {
+        const e = r.reason;
+        const why = e && (e.name === "AbortError" || e.name === "TimeoutError")
+          ? "timed out"
+          : (e && e.message) || String(e);
+        failures.push(`${group[i].uri} → ${why}`);
+      });
     }
   }
   console.warn("Plex server discovery failed for these connections:", failures);
   const err = new Error(
     servers.length
-      ? `Could not reach any Plex server (${failures.length} attempted)`
+      ? `Could not reach any Plex server (${failures.length} attempted). If you're not on ` +
+        `the server's home network, the owner needs Plex Relay enabled or a reachable remote connection.`
       : "Your Plex account has no shared servers — check the share invite was accepted"
   );
   err.details = failures;
@@ -1207,7 +1240,7 @@ el("logout-btn").onclick = () => {
 
 // ---------- Boot ----------
 
-async function boot() {
+async function boot(isRetry = false) {
   let token = store.token;
   if (!token) return showLogin();
 
@@ -1254,7 +1287,15 @@ async function boot() {
     showHome();
   } catch (err) {
     console.error(err);
+    const hadCachedServer = !!store.server;
     store.server = null;
+    // A cached connection can go stale between sessions — dynamic public IP,
+    // relay node rotation, or the listener simply left the home network. Re-run
+    // discovery from scratch once before falling back to the sign-in screen.
+    if (hadCachedServer && !isRetry) {
+      showLogin("Reconnecting to your server…");
+      return boot(true);
+    }
     showLogin(err.message, err.details);
   }
 }
