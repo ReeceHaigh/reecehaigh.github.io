@@ -547,18 +547,33 @@ input[type=range]::-moz-range-thumb {
 .fs-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 1.8em;
   flex-shrink: 0;
 }
 .fs-controls button {
   background: none;
   border: none;
   color: var(--text);
-  font-size: 1.6em;
+  font-size: 1.4em;
+  /* Equal flexible cells rather than a fixed em width — emoji have wildly
+     different intrinsic metrics (🔀/🔁 render with their own colorful
+     rounded-square art, ⏮/⏭/📡/🎚 don't), so without a uniform box per
+     button the row reads as unevenly sized. Flexible (not fixed) width
+     also guarantees the row always exactly fits the screen instead of
+     overflowing it on a narrow phone. */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 2.4em;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
 }
-.fs-controls .control-toggle { font-size: 1.1em; }
-#fs-play { font-size: 2.6em; }
+.fs-controls .control-toggle { font-size: 1.4em; }
+#fs-play {
+  background: var(--accent);
+  color: #1a1200;
+}
 
 /* Toast */
 .toast {
