@@ -1,41 +1,428 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>Radio</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Radio Stations — reecehaigh.com</title>
+<link rel="icon" href="favicon.ico">
+<style>
+  :root {
+    --bg: #0d0d0e;
+    --bg-raised: #17181a;
+    --border: #2a2b2e;
+    --text: #e8e8e8;
+    --text-dim: #9a9a9c;
+    --accent: #e5a00d;
+    --accent-dim: #a3760c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  body { padding-bottom: 5.5em; }
+  header {
+    padding: 2em 1.25em 1em;
+    text-align: center;
+  }
+  header h1 {
+    margin: 0 0 0.2em;
+    color: var(--accent);
+    letter-spacing: 0.03em;
+  }
+  header p { color: var(--text-dim); margin: 0; font-size: 0.9em; }
+
+  .search-wrap { max-width: 480px; margin: 1.25em auto 0; padding: 0 1.25em; }
+  #search {
+    width: 100%;
+    padding: 0.6em 0.9em;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.95em;
+  }
+  #search:focus { outline: 1px solid var(--accent-dim); }
+
+  main { max-width: 900px; margin: 0 auto; padding: 1.5em 1.25em; }
+
+  .category { margin-bottom: 2em; }
+  .category h2 {
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4em;
+    margin: 0 0 0.75em;
+  }
+
+  .stations {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.75em;
+  }
+
+  .station {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.7em 0.8em;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .station:hover { border-color: var(--accent-dim); }
+  .station.playing { border-color: var(--accent); }
+
+  .station .play-btn {
+    flex: none;
+    width: 2.4em;
+    height: 2.4em;
+    border-radius: 50%;
+    border: none;
+    background: var(--border);
+    color: var(--text);
+    font-size: 1em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .station.playing .play-btn { background: var(--accent); color: #1a1200; }
+  .station.loading .play-btn { background: var(--accent-dim); color: #1a1200; }
+
+  .station-info { min-width: 0; flex: 1; }
+  .station-name {
+    font-weight: 600;
+    font-size: 0.95em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .station-desc {
+    color: var(--text-dim);
+    font-size: 0.8em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .station.error .station-desc { color: #d9534f; }
+
+  .empty-msg { color: var(--text-dim); text-align: center; padding: 2em 0; display: none; }
+
+  footer#now-playing {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: var(--bg-raised);
+    border-top: 1px solid var(--border);
+    padding: 0.6em 1em;
+    display: flex;
+    align-items: center;
+    gap: 1em;
+    transform: translateY(100%);
+    transition: transform 0.2s ease;
+  }
+  footer#now-playing.visible { transform: translateY(0); }
+
+  .np-meta { flex: 1; min-width: 0; }
+  .np-meta .np-status { color: var(--text-dim); font-size: 0.75em; }
+  .np-meta .np-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  #np-stop {
+    flex: none;
+    border: none;
+    background: var(--border);
+    color: var(--text);
+    width: 2.2em;
+    height: 2.2em;
+    border-radius: 50%;
+    font-size: 1em;
+    cursor: pointer;
+  }
+
+  .np-volume { display: flex; align-items: center; gap: 0.5em; }
+  .np-volume input[type="range"] { width: 90px; }
+
+  @media (max-width: 480px) {
+    .np-volume { display: none; }
+  }
+</style>
 </head>
 <body>
 
-<h1>HR P</h1>
-<p><a href="https://stream-al.planetradio.co.uk/hitsradiopride.aac">HR P AAC</a></p>
+<header>
+  <h1>Radio Stations</h1>
+  <p>A personal collection of internet radio streams — tap a station to play.</p>
+</header>
 
-<h1>Vocaloid Radio</h1>
-<p><a href="http://curiosity.shoutca.st:8019/128">Vocaloid Radio</a></p>
+<div class="search-wrap">
+  <input id="search" type="search" placeholder="Search stations…" autocomplete="off">
+</div>
 
-<h1>Aycliffe Radio</h1>
-<p><a href="https://solid41.streamupsolutions.com/proxy/catidbxp?mp=/;type=aac">Aycliffe Radio</a></p>
+<main id="stations-root"></main>
 
-<h1>997 Todays Hits</h1>
-<p><a href="https://17563.live.streamtheworld.com/977_HITS_SC">LINK</a></p>
- 
-<h1>Heart 00s</h1>
-<p><a href="https://media-ssl.musicradio.com/Heart00sMP3">LINK</a></p>
+<audio id="audio" preload="none"></audio>
 
-<h1>Heart 90s</h1>
-<p><a href="https://media-ssl.musicradio.com/Heart90sMP3">LINK</a></p>
-  
-<h1>Heart 80s</h1>
-<p><a href="https://media-ssl.musicradio.com/Heart80sMP3">LINK</a></p>
+<footer id="now-playing">
+  <div class="np-meta">
+    <div class="np-status" id="np-status">Stopped</div>
+    <div class="np-title" id="np-title"></div>
+  </div>
+  <div class="np-volume">
+    <span>🔊</span>
+    <input id="np-volume" type="range" min="0" max="100" value="80">
+  </div>
+  <button id="np-stop" title="Stop">⏹</button>
+</footer>
 
-<h1>Exclusive Radio</h1>
-<p><a href="https://streaming.exclusive.radio/er/arianagrande/icecast.audio">Ariana Grande</a></p>
+<script>
+(function () {
+  var CATEGORIES = [
+    {
+      name: "Pride & LGBT+",
+      stations: [
+        { name: "Hits Radio Pride", desc: "24/7", url: "https://stream-al.planetradio.co.uk/hitsradiopride.aac" },
+        { name: "Pride Radio", desc: "Newcastle, UK", url: "https://richkell.radioca.st/stream.mp3" },
+        { name: "Gaydio", desc: "Manchester, UK", url: "https://listen-gaydio.sharp-stream.com/gaydioukhq.mp3" }
+      ]
+    },
+    {
+      name: "Hits & Pop",
+      stations: [
+        { name: "977 Today's Hits", desc: "Florida, USA", url: "https://17563.live.streamtheworld.com/977_HITS_SC" },
+        { name: "Exclusive Chart", desc: "Today's biggest hits, non stop", url: "https://streaming.exclusive.radio/er/chart/icecast.audio" }
+      ]
+    },
+    {
+      name: "Heart Decades",
+      stations: [
+        { name: "Heart 00s", desc: "2000s", url: "https://media-ssl.musicradio.com/Heart00sMP3" },
+        { name: "Heart 90s", desc: "1990s", url: "https://media-ssl.musicradio.com/Heart90sMP3" },
+        { name: "Heart 80s", desc: "1980s", url: "https://media-ssl.musicradio.com/Heart80sMP3" }
+      ]
+    },
+    {
+      name: "Exclusive Radio — Artists",
+      stations: [
+        { name: "Ariana Grande", desc: "Non stop Ariana Grande", url: "https://streaming.exclusive.radio/er/arianagrande/icecast.audio" },
+        { name: "Maroon 5", desc: "Non stop Maroon 5", url: "https://streaming.exclusive.radio/er/maroon5/icecast.audio" },
+        { name: "Lady Gaga", desc: "Non stop Lady Gaga", url: "https://streaming.exclusive.radio/er/ladygaga/icecast.audio" },
+        { name: "Nicki Minaj", desc: "Non stop Nicki Minaj", url: "https://streaming.exclusive.radio/er/nickiminaj/icecast.audio" },
+        { name: "George Michael", desc: "Non stop George Michael", url: "https://streaming.exclusive.radio/er/georgemichael/icecast.audio" },
+        { name: "Rihanna", desc: "Non stop Rihanna", url: "https://streaming.exclusive.radio/er/rihanna/icecast.audio" }
+      ]
+    },
+    {
+      name: "Exclusive Radio — Decades",
+      stations: [
+        { name: "Exclusive 2020s", desc: "Hits from 2020–now", url: "https://streaming.exclusive.radio/er/2020/icecast.audio" },
+        { name: "Exclusive 2010s", desc: "Hits from 2010–2019", url: "https://streaming.exclusive.radio/er/10s/icecast.audio" },
+        { name: "Exclusive 2000s", desc: "Hits from 2000–2009", url: "https://streaming.exclusive.radio/er/00s/icecast.audio" },
+        { name: "Exclusive 1990s", desc: "Hits from 1990–1999", url: "https://streaming.exclusive.radio/er/90s/icecast.audio" },
+        { name: "Exclusive 1980s", desc: "Hits from 1980–1989", url: "https://streaming.exclusive.radio/er/80s/icecast.audio" }
+      ]
+    },
+    {
+      name: "Other",
+      stations: [
+        { name: "Vocaloid Radio", desc: "World", url: "http://curiosity.shoutca.st:8019/128" },
+        { name: "Aycliffe Radio", desc: "Community radio", url: "https://solid41.streamupsolutions.com/proxy/catidbxp?mp=/;type=aac" },
+        { name: "Exclusive Country", desc: "All classic country, all the time", url: "https://streaming.exclusive.radio/er/country/icecast.audio" },
+        { name: "Radio 1190", desc: "KVCU — Boulder, CO", url: "http://radio1190.colorado.edu:8000/high.mp3" },
+        { name: "Fallout 4 Radio", desc: "In-game style radio", url: "http://fallout.fm:8000/falloutfm6.ogg" }
+      ]
+    }
+  ];
 
-<p><a href="https://streaming.exclusive.radio/er/maroon5/icecast.audio">Maroon 5</a></p>
+  var audio = document.getElementById("audio");
+  var root = document.getElementById("stations-root");
+  var searchInput = document.getElementById("search");
+  var nowPlaying = document.getElementById("now-playing");
+  var npTitle = document.getElementById("np-title");
+  var npStatus = document.getElementById("np-status");
+  var npVolume = document.getElementById("np-volume");
+  var npStop = document.getElementById("np-stop");
 
-<p><a href="https://streaming.exclusive.radio/er/ladygaga/icecast.audio">Lady Gaga</a></p>
+  var savedVolume = parseInt(localStorage.getItem("radio-volume"), 10);
+  audio.volume = (isNaN(savedVolume) ? 80 : savedVolume) / 100;
+  npVolume.value = audio.volume * 100;
 
-<p><a href="https://streaming.exclusive.radio/er/nickiminaj/icecast.audio">Nicki Minaj</a></p>
+  var currentEl = null;
 
-<p><a href="https://streaming.exclusive.radio/er/2020/icecast.audio">2020</a></p>
+  function render() {
+    var query = searchInput.value.trim().toLowerCase();
+    root.innerHTML = "";
+    var anyVisible = false;
+
+    CATEGORIES.forEach(function (category) {
+      var matches = category.stations.filter(function (station) {
+        return !query ||
+          station.name.toLowerCase().indexOf(query) !== -1 ||
+          station.desc.toLowerCase().indexOf(query) !== -1;
+      });
+      if (matches.length === 0) return;
+      anyVisible = true;
+
+      var section = document.createElement("div");
+      section.className = "category";
+
+      var heading = document.createElement("h2");
+      heading.textContent = category.name;
+      section.appendChild(heading);
+
+      var grid = document.createElement("div");
+      grid.className = "stations";
+
+      matches.forEach(function (station) {
+        grid.appendChild(buildStationCard(station));
+      });
+
+      section.appendChild(grid);
+      root.appendChild(section);
+    });
+
+    var empty = document.getElementById("empty-msg");
+    if (!anyVisible) {
+      var msg = document.createElement("p");
+      msg.className = "empty-msg";
+      msg.style.display = "block";
+      msg.textContent = "No stations match “" + searchInput.value + "”.";
+      root.appendChild(msg);
+    }
+  }
+
+  function buildStationCard(station) {
+    var el = document.createElement("div");
+    el.className = "station";
+    el.dataset.url = station.url;
+
+    var btn = document.createElement("button");
+    btn.className = "play-btn";
+    btn.textContent = "▶";
+    btn.setAttribute("aria-label", "Play " + station.name);
+
+    var info = document.createElement("div");
+    info.className = "station-info";
+
+    var name = document.createElement("div");
+    name.className = "station-name";
+    name.textContent = station.name;
+
+    var desc = document.createElement("div");
+    desc.className = "station-desc";
+    desc.textContent = station.desc;
+
+    info.appendChild(name);
+    info.appendChild(desc);
+    el.appendChild(btn);
+    el.appendChild(info);
+
+    el.addEventListener("click", function () {
+      toggleStation(station, el);
+    });
+
+    if (currentUrl === station.url) {
+      markState(el, currentState);
+      currentEl = el;
+    }
+
+    return el;
+  }
+
+  var currentUrl = null;
+  var currentState = "stopped";
+
+  function markState(el, state) {
+    el.classList.remove("playing", "loading", "error");
+    var btn = el.querySelector(".play-btn");
+    if (state === "playing") {
+      el.classList.add("playing");
+      btn.textContent = "⏸";
+    } else if (state === "loading") {
+      el.classList.add("loading");
+      btn.textContent = "⋯";
+    } else if (state === "error") {
+      el.classList.add("error");
+      btn.textContent = "▶";
+    } else {
+      btn.textContent = "▶";
+    }
+  }
+
+  function toggleStation(station, el) {
+    if (currentUrl === station.url && currentState !== "stopped" && currentState !== "error") {
+      stop();
+      return;
+    }
+    play(station, el);
+  }
+
+  function play(station, el) {
+    if (currentEl) markState(currentEl, "stopped");
+
+    currentUrl = station.url;
+    currentEl = el;
+    currentState = "loading";
+    markState(el, "loading");
+
+    npTitle.textContent = station.name;
+    npStatus.textContent = "Connecting…";
+    nowPlaying.classList.add("visible");
+
+    audio.pause();
+    audio.src = station.url;
+    audio.play().catch(function () {
+      // handled by the "error" event below
+    });
+  }
+
+  function stop() {
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    if (currentEl) markState(currentEl, "stopped");
+    currentState = "stopped";
+    currentUrl = null;
+    currentEl = null;
+    npStatus.textContent = "Stopped";
+    npTitle.textContent = "";
+    nowPlaying.classList.remove("visible");
+  }
+
+  audio.addEventListener("playing", function () {
+    currentState = "playing";
+    if (currentEl) markState(currentEl, "playing");
+    npStatus.textContent = "Playing";
+  });
+
+  audio.addEventListener("waiting", function () {
+    if (currentState === "playing") npStatus.textContent = "Buffering…";
+  });
+
+  audio.addEventListener("error", function () {
+    if (!currentUrl) return;
+    currentState = "error";
+    if (currentEl) markState(currentEl, "error");
+    npStatus.textContent = "Couldn't connect to this station";
+  });
+
+  npStop.addEventListener("click", stop);
+
+  npVolume.addEventListener("input", function () {
+    audio.volume = npVolume.value / 100;
+    localStorage.setItem("radio-volume", npVolume.value);
+  });
+
+  searchInput.addEventListener("input", render);
+
+  render();
+})();
+</script>
 
 </body>
 </html>
