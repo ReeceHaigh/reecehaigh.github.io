@@ -138,6 +138,17 @@
 <audio id="audio-b"></audio>
 <div id="toast" class="toast hidden"></div>
 
+<div id="playlist-picker-backdrop" class="modal-backdrop hidden"></div>
+<div id="playlist-picker" class="modal hidden">
+  <div class="modal-header">Add to Playlist</div>
+  <div id="playlist-picker-list" class="modal-list"></div>
+  <form id="playlist-picker-new-form" class="modal-new-form">
+    <input id="playlist-picker-new-name" type="text" placeholder="New playlist name" autocomplete="off">
+    <button type="submit">Create</button>
+  </form>
+  <button id="playlist-picker-cancel" class="modal-cancel">Cancel</button>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

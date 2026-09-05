@@ -149,6 +149,18 @@ class PlexAPI {
     return data.MediaContainer;
   }
 
+  async request(method, path) {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`, {
+      method,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    const text = await res.text();
+    if (!text) return null;
+    try { return JSON.parse(text).MediaContainer; } catch (e) { return null; }
+  }
+
   async getRawText(path) {
     const sep = path.includes("?") ? "&" : "?";
     const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`);
@@ -196,6 +208,30 @@ class PlexAPI {
 
   getPlaylistItems(ratingKey) {
     return this.get(`/playlists/${ratingKey}/items`).then(c => c.Metadata || []);
+  }
+
+  // Playlist item URIs are addressed as server://<machineIdentifier>/... rather
+  // than by plain ratingKey — cached since it's the same for every call in a
+  // session and each lookup is one more round trip before the action completes.
+  async getMachineIdentifier() {
+    if (!this._machineId) {
+      const c = await this.get("/");
+      this._machineId = c.machineIdentifier;
+    }
+    return this._machineId;
+  }
+
+  async createPlaylist(title, ratingKey) {
+    const machineId = await this.getMachineIdentifier();
+    const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
+    const c = await this.request("POST", `/playlists?type=audio&smart=0&title=${encodeURIComponent(title)}&uri=${uri}`);
+    return c?.Metadata?.[0];
+  }
+
+  async addToPlaylist(playlistRatingKey, ratingKey) {
+    const machineId = await this.getMachineIdentifier();
+    const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
+    await this.request("PUT", `/playlists/${playlistRatingKey}/items?uri=${uri}`);
   }
 
   getFacet(sectionKey, facet, type) {
@@ -535,9 +571,11 @@ async function showAlbum(album) {
       <div class="title">${track.title}</div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
     list.appendChild(row);
   });
 }
@@ -578,9 +616,11 @@ async function showPlaylistDetail(playlist) {
       <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
     list.appendChild(row);
   });
 }
@@ -679,9 +719,11 @@ async function showAllTracks() {
       <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
     list.appendChild(row);
   });
 }
@@ -717,9 +759,11 @@ async function showFolder() {
         <div class="title">${item.title}</div>
         <div class="dur">${fmtDuration(item.duration)}</div>
         <button class="add-to-queue-btn" title="Add to queue">+</button>
+        <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
       `;
       row.onclick = () => playQueue(tracks, idx);
       wireAddToQueueButton(row, item);
+      wireAddToPlaylistButton(row, item);
       rows.appendChild(row);
     } else {
       const match = (item.key || "").match(/parent=(\d+)/);
@@ -746,9 +790,11 @@ async function showSearchResults(query) {
       <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
     `;
     row.onclick = () => playQueue(results, i);
     wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
     list.appendChild(row);
   });
 }
@@ -935,6 +981,75 @@ function wireAddToQueueButton(row, track) {
   const btn = row.querySelector(".add-to-queue-btn");
   if (btn) btn.onclick = (e) => { e.stopPropagation(); addToQueue(track); };
 }
+
+function wireAddToPlaylistButton(row, track) {
+  const btn = row.querySelector(".add-to-playlist-btn");
+  if (btn) btn.onclick = (e) => { e.stopPropagation(); openPlaylistPicker(track); };
+}
+
+// ---------- "Add to playlist" picker ----------
+
+let playlistPickerTrack = null;
+
+async function openPlaylistPicker(track) {
+  playlistPickerTrack = track;
+  el("playlist-picker-new-name").value = "";
+  el("playlist-picker-backdrop").classList.remove("hidden");
+  el("playlist-picker").classList.remove("hidden");
+  const list = el("playlist-picker-list");
+  list.innerHTML = `<p>Loading playlists…</p>`;
+  try {
+    const playlists = await api.getPlaylists();
+    list.innerHTML = "";
+    if (!playlists.length) {
+      list.innerHTML = `<p>No playlists yet — create one below.</p>`;
+      return;
+    }
+    playlists
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .forEach(p => list.appendChild(renderSimpleRow(p.title, "", () => addTrackToExistingPlaylist(p))));
+  } catch (e) {
+    list.innerHTML = `<p>Couldn't load playlists.</p>`;
+  }
+}
+
+function closePlaylistPicker() {
+  playlistPickerTrack = null;
+  el("playlist-picker-backdrop").classList.add("hidden");
+  el("playlist-picker").classList.add("hidden");
+}
+
+async function addTrackToExistingPlaylist(playlist) {
+  const track = playlistPickerTrack;
+  if (!track) return;
+  closePlaylistPicker();
+  try {
+    await api.addToPlaylist(playlist.ratingKey, track.ratingKey);
+    showToast(`Added "${track.title}" to ${playlist.title}`);
+  } catch (e) {
+    showToast(`Couldn't add to ${playlist.title}`);
+  }
+}
+
+async function createPlaylistWithTrack(title) {
+  const track = playlistPickerTrack;
+  if (!track) return;
+  closePlaylistPicker();
+  try {
+    await api.createPlaylist(title, track.ratingKey);
+    showToast(`Created playlist "${title}"`);
+  } catch (e) {
+    showToast(`Couldn't create playlist "${title}"`);
+  }
+}
+
+el("playlist-picker-backdrop").onclick = closePlaylistPicker;
+el("playlist-picker-cancel").onclick = closePlaylistPicker;
+el("playlist-picker-new-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = el("playlist-picker-new-name").value.trim();
+  if (name) createPlaylistWithTrack(name);
+});
 
 function refreshQueueViewIfOpen() {
   if (fsViewMode === "queue") renderQueueView();

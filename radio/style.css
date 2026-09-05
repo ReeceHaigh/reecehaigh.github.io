@@ -259,7 +259,7 @@ button {
 
 .track-row {
   display: grid;
-  grid-template-columns: 2em 1fr auto auto;
+  grid-template-columns: 2em 1fr auto auto auto;
   gap: 0.75em;
   align-items: center;
   padding: 0.5em 0.6em;
@@ -530,7 +530,7 @@ input[type=range]::-moz-range-thumb {
   padding: 0.8em 0.3em 0.3em;
 }
 
-.add-to-queue-btn {
+.add-to-queue-btn, .add-to-playlist-btn {
   background: none;
   border: none;
   color: var(--text-dim);
@@ -538,7 +538,7 @@ input[type=range]::-moz-range-thumb {
   padding: 0 0.4em;
   flex-shrink: 0;
 }
-.add-to-queue-btn:hover { color: var(--accent); }
+.add-to-queue-btn:hover, .add-to-playlist-btn:hover { color: var(--accent); }
 
 .fs-progress { flex-shrink: 0; margin: 1em 0; }
 .fs-progress input[type=range] { width: 100%; }
@@ -578,6 +578,55 @@ input[type=range]::-moz-range-thumb {
   opacity: 1;
 }
 .toast.hidden { opacity: 0; transform: translateX(-50%) translateY(10px); pointer-events: none; }
+
+/* "Add to playlist" modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 500;
+}
+.modal-backdrop.hidden { display: none; }
+.modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2.5em));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1em;
+  z-index: 501;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.modal.hidden { display: none; }
+.modal-header { font-weight: 600; margin-bottom: 0.6em; }
+.modal-list { overflow-y: auto; margin-bottom: 0.6em; }
+.modal-list .simple-row { padding: 0.6em; }
+.modal-list p { color: var(--text-dim); font-size: 0.9em; margin: 0.5em 0; }
+.modal-new-form { display: flex; gap: 0.5em; margin-bottom: 0.6em; }
+.modal-new-form input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5em 0.7em;
+  color: var(--text);
+}
+.modal-new-form button, .modal-cancel {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.5em 0.9em;
+}
+.modal-new-form button:hover, .modal-cancel:hover { border-color: var(--accent); color: var(--accent); }
+.modal-cancel { align-self: flex-end; }
 
 /* A little something for anyone clicking the logo too many times */
 @keyframes discoHue {
