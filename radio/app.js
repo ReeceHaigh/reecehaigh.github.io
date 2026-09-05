@@ -1,6 +1,15 @@
 const PRODUCT = "reecehaigh.com radio";
 const VERSION = "1.0";
 
+// Base URL for every Plex API / media request. "/plex" is a same-origin
+// Cloudflare Worker (see ../radio-worker/) that proxies to the Plex server and
+// rewrites the CORS header Plex otherwise pins to https://app.plex.tv — which
+// is what stops this page, served from https://reecehaigh.com, from calling a
+// Plex server directly in the browser. Because the Worker resolves the server
+// itself (preferring the Relay node), the client-side discovery below is
+// skipped while this is set. Set to "" to fall back to direct discovery.
+const PLEX_BASE_URL = "/plex";
+
 // iOS Safari's address/tab bar shows and hides as you scroll, and CSS vh/dvh
 // units don't reliably track that across iOS Safari versions — visualViewport
 // (or innerHeight as a fallback) does. Drives the --vh custom property that
@@ -1245,14 +1254,20 @@ async function boot(isRetry = false) {
   if (!token) return showLogin();
 
   try {
-    let server = store.server;
-    // server.relay is only present on connections picked up after the relay-
-    // avoidance fix — re-discover once for anyone with an older cached entry.
-    if (!server || server.relay === undefined) {
-      server = await discoverServer(token, (attempt, total) => {
-        if (attempt > 1) showLogin(`Connecting to your server… (attempt ${attempt}/${total})`);
-      });
-      store.server = server;
+    let server;
+    if (PLEX_BASE_URL) {
+      // The proxy does its own server discovery — just point at it.
+      server = { name: "Plex (via proxy)", uri: PLEX_BASE_URL, relay: false };
+    } else {
+      server = store.server;
+      // server.relay is only present on connections picked up after the relay-
+      // avoidance fix — re-discover once for anyone with an older cached entry.
+      if (!server || server.relay === undefined) {
+        server = await discoverServer(token, (attempt, total) => {
+          if (attempt > 1) showLogin(`Connecting to your server… (attempt ${attempt}/${total})`);
+        });
+        store.server = server;
+      }
     }
     api = new PlexAPI(server.uri, token);
 
@@ -1292,7 +1307,7 @@ async function boot(isRetry = false) {
     // A cached connection can go stale between sessions — dynamic public IP,
     // relay node rotation, or the listener simply left the home network. Re-run
     // discovery from scratch once before falling back to the sign-in screen.
-    if (hadCachedServer && !isRetry) {
+    if (!PLEX_BASE_URL && hadCachedServer && !isRetry) {
       showLogin("Reconnecting to your server…");
       return boot(true);
     }
