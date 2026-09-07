@@ -234,6 +234,13 @@ class PlexAPI {
     await this.request("PUT", `/playlists/${playlistRatingKey}/items?uri=${uri}`);
   }
 
+  // Plex's rating scale is 0-10 (half-star increments) with no dedicated
+  // "favorite" flag — every Plex client, Plexamp included, uses a rating of
+  // 10 (5 stars) as its "favorite" signal, and -1 to clear it back to unrated.
+  async rate(ratingKey, rating) {
+    await this.request("PUT", `/:/rate?key=${ratingKey}&identifier=com.plexapp.plugins.library&rating=${rating}`);
+  }
+
   getFacet(sectionKey, facet, type) {
     return this.get(`/library/sections/${sectionKey}/${facet}?type=${type}`).then(c => c.Directory || []);
   }
@@ -572,10 +579,12 @@ async function showAlbum(album) {
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+      <button class="favorite-btn" title="Favorite">☆</button>
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
     wireAddToPlaylistButton(row, track);
+    wireFavoriteButton(row, track);
     list.appendChild(row);
   });
 }
@@ -617,10 +626,12 @@ async function showPlaylistDetail(playlist) {
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+      <button class="favorite-btn" title="Favorite">☆</button>
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
     wireAddToPlaylistButton(row, track);
+    wireFavoriteButton(row, track);
     list.appendChild(row);
   });
 }
@@ -720,10 +731,12 @@ async function showAllTracks() {
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+      <button class="favorite-btn" title="Favorite">☆</button>
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
     wireAddToPlaylistButton(row, track);
+    wireFavoriteButton(row, track);
     list.appendChild(row);
   });
 }
@@ -760,10 +773,12 @@ async function showFolder() {
         <div class="dur">${fmtDuration(item.duration)}</div>
         <button class="add-to-queue-btn" title="Add to queue">+</button>
         <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+        <button class="favorite-btn" title="Favorite">☆</button>
       `;
       row.onclick = () => playQueue(tracks, idx);
       wireAddToQueueButton(row, item);
       wireAddToPlaylistButton(row, item);
+      wireFavoriteButton(row, item);
       rows.appendChild(row);
     } else {
       const match = (item.key || "").match(/parent=(\d+)/);
@@ -791,10 +806,12 @@ async function showSearchResults(query) {
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+      <button class="favorite-btn" title="Favorite">☆</button>
     `;
     row.onclick = () => playQueue(results, i);
     wireAddToQueueButton(row, track);
     wireAddToPlaylistButton(row, track);
+    wireFavoriteButton(row, track);
     list.appendChild(row);
   });
 }
@@ -872,6 +889,7 @@ function syncNowPlayingUI(track) {
   updateMediaSessionMetadata(track, artUrlLarge);
   loadLyricsForTrack(track);
   refreshQueueViewIfOpen();
+  paintFsFavoriteToggle(track);
 }
 
 // ---------- Lyrics ----------
@@ -985,6 +1003,78 @@ function wireAddToQueueButton(row, track) {
 function wireAddToPlaylistButton(row, track) {
   const btn = row.querySelector(".add-to-playlist-btn");
   if (btn) btn.onclick = (e) => { e.stopPropagation(); openPlaylistPicker(track); };
+}
+
+// ---------- Favorites ----------
+
+function isFavorited(track) {
+  return (track.userRating || 0) >= 10;
+}
+
+function wireFavoriteButton(row, track) {
+  const btn = row.querySelector(".favorite-btn");
+  if (!btn) return;
+  paintFavoriteButton(btn, track);
+  btn.onclick = (e) => { e.stopPropagation(); toggleFavorite(track, btn); };
+}
+
+function paintFavoriteButton(btn, track) {
+  const fav = isFavorited(track);
+  btn.textContent = fav ? "★" : "☆";
+  btn.classList.toggle("active", fav);
+}
+
+async function toggleFavorite(track, btn) {
+  const wasFavorited = isFavorited(track);
+  const newRating = wasFavorited ? -1 : 10;
+  try {
+    await api.rate(track.ratingKey, newRating);
+    track.userRating = newRating === -1 ? undefined : newRating;
+    if (btn) paintFavoriteButton(btn, track);
+    if (el("fs-favorite-toggle") && queue[order[orderPos]]?.ratingKey === track.ratingKey) {
+      paintFsFavoriteToggle(track);
+    }
+    showToast(wasFavorited ? `Removed "${track.title}" from favorites` : `Added "${track.title}" to favorites`);
+  } catch (e) {
+    showToast("Couldn't update favorite");
+  }
+}
+
+function paintFsFavoriteToggle(track) {
+  const btn = el("fs-favorite-toggle");
+  const fav = isFavorited(track);
+  btn.textContent = fav ? "★" : "☆";
+  btn.classList.toggle("active", fav);
+}
+
+async function showFavorites() {
+  switchView("favorites");
+  const container = el("view-favorites");
+  container.innerHTML = `<div class="section-heading">Favorites</div><div id="favorites-list"></div>`;
+  const list = el("favorites-list");
+  const tracks = (await api.getAllTracks(musicSectionKey)).filter(isFavorited);
+  if (!tracks.length) {
+    list.innerHTML = `<p style="color:var(--text-dim)">No favorites yet — tap the star on any track.</p>`;
+    return;
+  }
+  tracks.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.dataset.ratingKey = track.ratingKey;
+    row.innerHTML = `
+      <div class="idx">♪</div>
+      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+      <button class="favorite-btn" title="Favorite">☆</button>
+    `;
+    row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
+    wireFavoriteButton(row, track);
+    list.appendChild(row);
+  });
 }
 
 // ---------- "Add to playlist" picker ----------
@@ -1566,6 +1656,10 @@ el("fs-seek").oninput = (e) => {
 el("fs-collapse").onclick = closeNowPlayingFull;
 el("fs-lyrics-toggle").onclick = () => showFsView(fsViewMode === "lyrics" ? "now-playing" : "lyrics");
 el("fs-queue-toggle").onclick = () => showFsView(fsViewMode === "queue" ? "now-playing" : "queue");
+el("fs-favorite-toggle").onclick = () => {
+  const track = queue[order[orderPos]];
+  if (track) toggleFavorite(track, null);
+};
 
 updateShuffleRepeatUI();
 
@@ -1600,6 +1694,7 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
     if (view === "artists") showArtists();
     if (view === "albums") showAlbums();
     if (view === "playlists") showPlaylists();
+    if (view === "favorites") showFavorites();
     if (view === "library") showLibrary();
     closeSidebar();
   };
