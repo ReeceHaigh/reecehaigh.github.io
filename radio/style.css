@@ -259,7 +259,7 @@ button {
 
 .track-row {
   display: grid;
-  grid-template-columns: 2em 1fr auto auto auto;
+  grid-template-columns: 2em 1fr auto auto auto auto;
   gap: 0.75em;
   align-items: center;
   padding: 0.5em 0.6em;
@@ -530,7 +530,7 @@ input[type=range]::-moz-range-thumb {
   padding: 0.8em 0.3em 0.3em;
 }
 
-.add-to-queue-btn, .add-to-playlist-btn {
+.add-to-queue-btn, .add-to-playlist-btn, .favorite-btn {
   background: none;
   border: none;
   color: var(--text-dim);
@@ -538,7 +538,8 @@ input[type=range]::-moz-range-thumb {
   padding: 0 0.4em;
   flex-shrink: 0;
 }
-.add-to-queue-btn:hover, .add-to-playlist-btn:hover { color: var(--accent); }
+.add-to-queue-btn:hover, .add-to-playlist-btn:hover, .favorite-btn:hover { color: var(--accent); }
+.favorite-btn.active { color: var(--accent); }
 
 .fs-progress { flex-shrink: 0; margin: 1em 0; }
 .fs-progress input[type=range] { width: 100%; }
