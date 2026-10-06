@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Hash &amp; Encode - Reece Haigh</title>
+<meta name="description" content="MD5 and SHA hashes, plus Base64, URL and hex encoding and decoding. Runs in your browser.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .hash-row { display: grid; grid-template-columns: 84px 1fr auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+  .hash-row:first-of-type { border-top: 0; }
+  .hash-row .name { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .04em; }
+  .hash-row .val { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
+  .btn.sm { padding: 6px 12px; font-size: 13px; }
+  @media (max-width: 560px) {
+    .hash-row { grid-template-columns: 1fr auto; }
+    .hash-row .val { grid-column: 1 / -1; grid-row: 2; }
+  }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Dev</span>
+      <h1 class="title">Hash &amp; Encode</h1>
+      <p class="lead">Hash text with MD5 and SHA, or encode and decode Base64, URL and hex. Nothing leaves your browser.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Input</h2>
+      <textarea id="input" class="mono" spellcheck="false" placeholder="Type or paste text&hellip;" aria-label="Input text"></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Hashes</h2>
+      <div id="hashes"></div>
+      <p id="nosubtle" class="err small" style="display:none;margin:8px 0 0">SHA hashing needs a secure (https) context, which this page isn't running in. MD5 still works.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Encode / decode</h2>
+      <div class="row" id="ops">
+        <button class="btn" type="button" data-op="b64e">Base64 encode</button>
+        <button class="btn" type="button" data-op="b64d">Base64 decode</button>
+        <button class="btn" type="button" data-op="urle">URL encode</button>
+        <button class="btn" type="button" data-op="urld">URL decode</button>
+        <button class="btn" type="button" data-op="hexe">Hex encode</button>
+        <button class="btn" type="button" data-op="hexd">Hex decode</button>
+      </div>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="urlsafe"> URL-safe Base64 (<code>-</code> and <code>_</code>, no padding)</label>
+      <div class="row spread" style="margin:16px 0 8px">
+        <span class="muted small" id="opname">Pick an operation</span>
+        <button class="btn sm" type="button" id="copyout">Copy</button>
+      </div>
+      <div class="out" id="output" aria-live="polite"></div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+    var enc = new TextEncoder(), dec = new TextDecoder('utf-8', { fatal: true });
+
+    // ---- MD5 (SubtleCrypto doesn't offer it) ----
+    function md5(bytes) {
+      var K = new Uint32Array(64), i;
+      for (i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+      var S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+      var len = bytes.length, total = (((len + 8) >>> 6) + 1) * 64;
+      var buf = new Uint8Array(total);
+      buf.set(bytes);
+      buf[len] = 0x80;
+      var view = new DataView(buf.buffer);
+      view.setUint32(total - 8, (len << 3) >>> 0, true);
+      view.setUint32(total - 4, Math.floor(len / 0x20000000), true);
+      var a0 = 0x67452301, b0 = 0xefcdab89 | 0, c0 = 0x98badcfe | 0, d0 = 0x10325476;
+      var M = new Uint32Array(16);
+      for (var off = 0; off < total; off += 64) {
+        for (i = 0; i < 16; i++) M[i] = view.getUint32(off + i * 4, true);
+        var A = a0, B = b0, C = c0, D = d0, F, g;
+        for (i = 0; i < 64; i++) {
+          if (i < 16) { F = (B & C) | (~B & D); g = i; }
+          else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+          else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+          else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+          F = (F + A + K[i] + M[g]) | 0;
+          A = D; D = C; C = B;
+          var s = S[(i >> 4) * 4 + (i % 4)];
+          B = (B + ((F << s) | (F >>> (32 - s)))) | 0;
+        }
+        a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+      }
+      var out = new DataView(new ArrayBuffer(16));
+      out.setUint32(0, a0, true); out.setUint32(4, b0, true); out.setUint32(8, c0, true); out.setUint32(12, d0, true);
+      return toHex(new Uint8Array(out.buffer));
+    }
+
+    function toHex(bytes) {
+      var s = '';
+      for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+      return s;
+    }
+
+    // ---- Hash table ----
+    var algos = [['MD5', null], ['SHA-1', 'SHA-1'], ['SHA-256', 'SHA-256'], ['SHA-384', 'SHA-384'], ['SHA-512', 'SHA-512']];
+    var hashBox = $('hashes'), vals = {};
+    algos.forEach(function (a) {
+      var row = document.createElement('div');
+      row.className = 'hash-row';
+      row.innerHTML = '<span class="name"></span><span class="val"></span><button class="btn sm" type="button">Copy</button>';
+      row.children[0].textContent = a[0];
+      row.children[2].addEventListener('click', function (e) { copy(vals[a[0]] || '', e.currentTarget); });
+      hashBox.appendChild(row);
+      vals[a[0]] = '';
+      a.row = row;
+    });
+
+    var hasSubtle = !!(window.crypto && crypto.subtle);
+    if (!hasSubtle) $('nosubtle').style.display = 'block';
+    var run = 0;
+
+    function setVal(a, v) { vals[a[0]] = v; a.row.children[1].textContent = v; }
+
+    function updateHashes() {
+      var bytes = enc.encode($('input').value);
+      var my = ++run;
+      setVal(algos[0], md5(bytes));
+      algos.slice(1).forEach(function (a) {
+        if (!hasSubtle) { setVal(a, 'unavailable'); return; }
+        crypto.subtle.digest(a[1], bytes).then(function (d) {
+          if (my === run) setVal(a, toHex(new Uint8Array(d)));
+        });
+      });
+    }
+
+    // ---- Encode / decode ----
+    function b64e(text, safe) {
+      var bin = '', bytes = enc.encode(text);
+      for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      var s = btoa(bin);
+      return safe ? s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : s;
+    }
+    function b64d(text) {
+      var s = text.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      var bin = atob(s), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return dec.decode(bytes);
+    }
+    function hexe(text) { return toHex(enc.encode(text)); }
+    function hexd(text) {
+      var s = text.replace(/0x/gi, '').replace(/[\s,:-]+/g, '');
+      if (!/^[0-9a-fA-F]*$/.test(s) || s.length % 2) throw new Error('Not valid hex (needs an even number of 0-9 / a-f characters).');
+      var bytes = new Uint8Array(s.length / 2);
+      for (var i = 0; i < bytes.length; i++) bytes[i] = parseInt(s.substr(i * 2, 2), 16);
+      return dec.decode(bytes);
+    }
+
+    var ops = {
+      b64e: ['Base64 encode', function (t) { return b64e(t, $('urlsafe').checked); }],
+      b64d: ['Base64 decode', b64d],
+      urle: ['URL encode', encodeURIComponent],
+      urld: ['URL decode', decodeURIComponent],
+      hexe: ['Hex encode', hexe],
+      hexd: ['Hex decode', hexd]
+    };
+    var current = null;
+
+    function runOp() {
+      if (!current) return;
+      var out = $('output');
+      $('opname').textContent = ops[current][0];
+      try {
+        out.textContent = ops[current][1]($('input').value);
+        out.classList.remove('err');
+      } catch (e) {
+        var m = e && e.name === 'InvalidCharacterError' ? 'Not valid Base64.'
+          : e && e.name === 'URIError' ? 'Not a valid percent-encoded string.'
+          : e && e.name === 'TypeError' ? 'Decoded bytes are not valid UTF-8 text.'
+          : (e && e.message) || 'Something went wrong.';
+        out.textContent = m;
+        out.classList.add('err');
+      }
+    }
+
+    $('ops').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-op]');
+      if (!b) return;
+      current = b.getAttribute('data-op');
+      Array.prototype.forEach.call($('ops').children, function (x) { x.classList.toggle('active', x === b); });
+      runOp();
+    });
+    $('urlsafe').addEventListener('change', runOp);
+
+    function copy(text, btn) {
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = old; }, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        ta.remove();
+      }
+    }
+    $('copyout').addEventListener('click', function (e) {
+      var out = $('output');
+      if (current && !out.classList.contains('err')) copy(out.textContent, e.currentTarget);
+    });
+
+    var t;
+    $('input').addEventListener('input', function () {
+      clearTimeout(t);
+      t = setTimeout(function () { updateHashes(); runOp(); }, 150);   // MD5 runs on the main thread, so debounce big pastes
+    });
+    updateHashes();
+  </script>
+</body>
+</html>

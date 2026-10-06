@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>radio — reecehaigh.com</title>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0d0d0e">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="radio">
+</head>
+<body>
+
+<div id="login-screen" class="screen">
+  <div class="login-box">
+    <h1>radio</h1>
+    <p>Sign in with Plex to play your music library.</p>
+    <button id="login-btn">Sign in with Plex</button>
+    <p id="login-status" class="status"></p>
+    <pre id="login-details" class="login-details hidden"></pre>
+  </div>
+</div>
+
+<div id="app" class="screen hidden">
+  <header id="mobile-bar">
+    <button id="menu-toggle" aria-label="Menu">☰</button>
+    <h1>radio</h1>
+  </header>
+  <div id="sidebar-backdrop" class="hidden"></div>
+  <aside id="sidebar">
+    <h1 id="sidebar-logo">radio</h1>
+    <nav>
+      <button class="nav-btn active" data-view="home">Home</button>
+      <button class="nav-btn" data-view="artists">Artists</button>
+      <button class="nav-btn" data-view="albums">Albums</button>
+      <button class="nav-btn" data-view="playlists">Playlists</button>
+      <button class="nav-btn" data-view="library">Library</button>
+    </nav>
+    <div class="search-box">
+      <input id="search-input" type="search" placeholder="Search library…">
+    </div>
+    <select id="library-select" class="library-select"></select>
+    <div id="server-info" class="server-info"></div>
+    <button id="logout-btn">Sign out</button>
+  </aside>
+
+  <main id="content">
+    <div id="view-home" class="view"></div>
+    <div id="view-artists" class="view hidden"></div>
+    <div id="view-albums" class="view hidden"></div>
+    <div id="view-album-detail" class="view hidden"></div>
+    <div id="view-playlists" class="view hidden"></div>
+    <div id="view-playlist-detail" class="view hidden"></div>
+    <div id="view-library" class="view hidden"></div>
+    <div id="view-tag-list" class="view hidden"></div>
+    <div id="view-tag-detail" class="view hidden"></div>
+    <div id="view-all-tracks" class="view hidden"></div>
+    <div id="view-folder" class="view hidden"></div>
+    <div id="view-search" class="view hidden"></div>
+  </main>
+
+  <footer id="now-playing">
+    <div class="np-meta" id="np-meta">
+      <img id="np-art" src="" alt="">
+      <div class="np-text">
+        <div id="np-title">Nothing playing</div>
+        <div id="np-artist"></div>
+      </div>
+    </div>
+    <div class="np-controls">
+      <button id="np-shuffle" class="control-toggle" title="Shuffle">🔀</button>
+      <button id="np-repeat" class="control-toggle" title="Repeat">🔁</button>
+      <button id="np-prev" title="Previous">⏮</button>
+      <button id="np-play" title="Play/Pause">▶</button>
+      <button id="np-next" title="Next">⏭</button>
+      <button id="np-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
+      <button id="np-crossfade" class="control-toggle" title="Crossfade — blend into the next track">🎚</button>
+    </div>
+    <div class="np-progress">
+      <span id="np-time-current">0:00</span>
+      <input id="np-seek" type="range" min="0" max="100" value="0">
+      <span id="np-time-total">0:00</span>
+    </div>
+    <div class="np-volume">
+      <span>🔊</span>
+      <input id="np-volume" type="range" min="0" max="100" value="100">
+    </div>
+  </footer>
+</div>
+
+<div id="now-playing-full" class="now-playing-full hidden">
+  <div class="fs-header">
+    <button id="fs-collapse" aria-label="Collapse">⌄</button>
+    <div class="fs-header-title">Now Playing</div>
+    <div class="fs-header-actions">
+      <button id="fs-lyrics-toggle" class="fs-header-btn hidden" title="Lyrics">Lyrics</button>
+      <button id="fs-queue-toggle" class="fs-header-btn" title="Queue">Queue</button>
+    </div>
+  </div>
+  <div id="fs-main-view">
+    <div class="fs-art-wrap">
+      <img id="fs-art" src="" alt="">
+    </div>
+    <div class="fs-meta">
+      <div id="fs-title">Nothing playing</div>
+      <div id="fs-artist"></div>
+    </div>
+  </div>
+  <div id="fs-lyrics-view" class="hidden">
+    <div id="fs-lyrics-lines"></div>
+  </div>
+  <div id="fs-queue-view" class="hidden">
+    <div id="fs-queue-list"></div>
+  </div>
+  <div class="fs-progress">
+    <input id="fs-seek" type="range" min="0" max="100" value="0">
+    <div class="fs-times">
+      <span id="fs-time-current">0:00</span>
+      <span id="fs-time-total">0:00</span>
+    </div>
+  </div>
+  <div class="fs-controls">
+    <button id="fs-shuffle" class="control-toggle" title="Shuffle">🔀</button>
+    <button id="fs-repeat" class="control-toggle" title="Repeat">🔁</button>
+    <button id="fs-prev" title="Previous">⏮</button>
+    <button id="fs-play" title="Play/Pause">▶</button>
+    <button id="fs-next" title="Next">⏭</button>
+    <button id="fs-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
+    <button id="fs-crossfade" class="control-toggle" title="Crossfade — blend into the next track">🎚</button>
+  </div>
+</div>
+
+<audio id="audio"></audio>
+<audio id="audio-b"></audio>
+<div id="toast" class="toast hidden"></div>
+
+<div id="playlist-picker-backdrop" class="modal-backdrop hidden"></div>
+<div id="playlist-picker" class="modal hidden">
+  <div class="modal-header">Add to Playlist</div>
+  <div id="playlist-picker-list" class="modal-list"></div>
+  <form id="playlist-picker-new-form" class="modal-new-form">
+    <input id="playlist-picker-new-name" type="text" placeholder="New playlist name" autocomplete="off">
+    <button type="submit">Create</button>
+  </form>
+  <button id="playlist-picker-cancel" class="modal-cancel">Cancel</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

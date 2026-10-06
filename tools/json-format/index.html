@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>JSON Formatter - Reece Haigh</title>
+<meta name="description" content="Pretty-print, minify and validate JSON, with the error line and column.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .cols .panel + .panel { margin-top: 0; }
+  .cols textarea { min-height: 340px; white-space: pre; overflow: auto; tab-size: 2; }
+  #status { min-height: 24px; font-size: 14px; }
+  #errctx { margin-top: 8px; display: none; }
+  #errctx { color: var(--danger); }
+  select { width: auto; padding: 9px 12px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Dev</span>
+      <h1 class="title">JSON Formatter</h1>
+      <p class="lead">Paste JSON to pretty-print, minify or validate it. Errors point to the line and column. Nothing leaves your browser.</p>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <button class="btn btn-primary" type="button" id="format">Format</button>
+        <button class="btn" type="button" id="minify">Minify</button>
+        <label class="muted small" for="indent">Indent</label>
+        <select id="indent" aria-label="Indent">
+          <option value="2" selected>2 spaces</option>
+          <option value="4">4 spaces</option>
+          <option value="tab">Tab</option>
+        </select>
+        <label class="check"><input type="checkbox" id="sort"> Sort keys</label>
+        <span style="flex:1"></span>
+        <button class="btn" type="button" id="copy">Copy output</button>
+        <button class="btn" type="button" id="clear">Clear</button>
+      </div>
+      <div id="status" role="status" aria-live="polite" style="margin-top:12px"></div>
+      <pre id="errctx" class="out mono"></pre>
+    </div>
+
+    <div class="cols" style="margin-top:16px">
+      <div class="panel">
+        <h2>Input</h2>
+        <textarea id="input" class="mono" spellcheck="false" placeholder='{"hello": "world"}' aria-label="JSON input"></textarea>
+      </div>
+      <div class="panel">
+        <h2>Output</h2>
+        <textarea id="output" class="mono" spellcheck="false" readonly aria-label="Formatted output"></textarea>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    function sortDeep(v) {
+      if (Array.isArray(v)) return v.map(sortDeep);
+      if (v && typeof v === 'object') {
+        var o = {};
+        Object.keys(v).sort().forEach(function (k) { o[k] = sortDeep(v[k]); });
+        return o;
+      }
+      return v;
+    }
+
+    // Browsers disagree on whether JSON.parse errors carry a position (newer Chrome
+    // dropped it, Safari never had one), so on failure a small strict scanner finds
+    // the exact spot and gives a plain-English reason.
+    function findError(t) {
+      var i = 0, WS = ' \t\n\r', NUM = /-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y;
+      function fail(msg, pos) { throw { pos: pos === undefined ? i : pos, msg: msg }; }
+      function ws() { while (i < t.length && WS.indexOf(t[i]) >= 0) i++; }
+      function eoi() { return i >= t.length; }
+      function what(c) { return c === '\n' ? 'a line break' : "'" + c + "'"; }
+      function value() {
+        ws();
+        if (eoi()) fail('Unexpected end of input, a value is missing');
+        var c = t[i];
+        if (c === '{') return obj();
+        if (c === '[') return arr();
+        if (c === '"') return str();
+        if (c === '-' || (c >= '0' && c <= '9')) return num();
+        var lit = ['true', 'false', 'null'];
+        for (var k = 0; k < 3; k++) if (t.substr(i, lit[k].length) === lit[k]) { i += lit[k].length; return; }
+        fail('Unexpected ' + what(c) + (/[a-z]/i.test(c) ? " (strings need double quotes; only true, false and null are allowed bare)" : ''));
+      }
+      function obj() {
+        i++; ws();
+        if (t[i] === '}') { i++; return; }
+        for (;;) {
+          ws();
+          if (eoi()) fail("Unexpected end of input, expected a property name or '}'");
+          if (t[i] !== '"') fail('Expected a property name in double quotes, found ' + what(t[i]));
+          str(); ws();
+          if (eoi()) fail("Unexpected end of input, expected ':'");
+          if (t[i] !== ':') fail("Expected ':' after the property name, found " + what(t[i]));
+          i++; value(); ws();
+          if (eoi()) fail("Unexpected end of input, expected ',' or '}'");
+          if (t[i] === ',') { i++; continue; }
+          if (t[i] === '}') { i++; return; }
+          fail("Expected ',' or '}', found " + what(t[i]));
+        }
+      }
+      function arr() {
+        i++; ws();
+        if (t[i] === ']') { i++; return; }
+        for (;;) {
+          value(); ws();
+          if (eoi()) fail("Unexpected end of input, expected ',' or ']'");
+          if (t[i] === ',') { i++; continue; }
+          if (t[i] === ']') { i++; return; }
+          fail("Expected ',' or ']', found " + what(t[i]));
+        }
+      }
+      function str() {
+        var open = i; i++;
+        for (;;) {
+          if (eoi()) fail('Unterminated string', open);
+          var c = t[i];
+          if (c === '"') { i++; return; }
+          if (c === '\\') {
+            i++;
+            var e = t[i];
+            if (e !== undefined && '"\\/bfnrt'.indexOf(e) >= 0) i++;
+            else if (e === 'u') { if (!/^[0-9a-fA-F]{4}$/.test(t.substr(i + 1, 4))) fail('Invalid \\u escape, expected 4 hex digits'); i += 5; }
+            else fail('Invalid escape sequence in string');
+          } else if (c < ' ') fail('Line breaks and control characters inside strings must be escaped (use \\n)');
+          else i++;
+        }
+      }
+      function num() {
+        NUM.lastIndex = i;
+        var m = NUM.exec(t);
+        if (!m) fail('Invalid number');
+        i += m[0].length;
+      }
+      try {
+        value(); ws();
+        if (!eoi()) fail('Unexpected ' + what(t[i]) + ' after the end of the JSON value');
+      } catch (e) {
+        if (e && typeof e.pos === 'number') return e;
+        throw e;
+      }
+      return null;
+    }
+
+    function lineCol(text, pos) {
+      var before = text.slice(0, pos).split('\n');
+      return { line: before.length, col: before[before.length - 1].length + 1 };
+    }
+
+    function showError(text, e) {
+      var found = null;
+      try { found = findError(text); } catch (x) {}
+      var s = $('status'), ctx = $('errctx');
+      s.className = 'err';
+      if (!found) {   // scanner agrees it's valid but the engine disagrees: show the engine's message
+        s.textContent = 'Invalid JSON: ' + e.message;
+        ctx.style.display = 'none';
+        $('output').value = '';
+        return;
+      }
+      var loc = lineCol(text, found.pos);
+      s.textContent = 'Invalid JSON: ' + found.msg + ' (line ' + loc.line + ', column ' + loc.col + ')';
+      var l = text.split('\n')[loc.line - 1] || '';
+      var start = Math.max(0, loc.col - 41), snippet = l.slice(start, start + 80);
+      var gutter = loc.line + ' | ';
+      ctx.style.display = 'block';
+      ctx.textContent = gutter + snippet + '\n' + ' '.repeat(gutter.length + Math.max(0, loc.col - 1 - start)) + '^';
+      $('output').value = '';
+    }
+
+    function run(mode) {
+      var text = $('input').value, s = $('status');
+      $('errctx').style.display = 'none';
+      if (!text.trim()) { s.className = 'muted'; s.textContent = 'Paste some JSON first.'; $('output').value = ''; return; }
+      var val;
+      try { val = JSON.parse(text); } catch (e) { showError(text, e); return; }
+      if ($('sort').checked) val = sortDeep(val);
+      var ind = $('indent').value;
+      var out = mode === 'minify' ? JSON.stringify(val) : JSON.stringify(val, null, ind === 'tab' ? '\t' : +ind);
+      $('output').value = out;
+      $('input').scrollLeft = 0;
+      s.className = 'ok';
+      s.textContent = 'Valid JSON · ' + text.length.toLocaleString() + ' → ' + out.length.toLocaleString() + ' characters';
+    }
+
+    var last = 'format';
+    $('format').addEventListener('click', function () { last = 'format'; run(last); });
+    $('minify').addEventListener('click', function () { last = 'minify'; run(last); });
+    $('indent').addEventListener('change', function () { last = 'format'; run(last); });
+    $('sort').addEventListener('change', function () { if ($('input').value.trim()) run(last); });
+    $('input').addEventListener('input', function () { if (!$('input').value.trim()) { $('output').value = ''; $('status').textContent = ''; $('errctx').style.display = 'none'; } });
+    $('input').addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); last = 'format'; run(last); } });
+    $('clear').addEventListener('click', function () { $('input').value = ''; $('output').value = ''; $('status').textContent = ''; $('errctx').style.display = 'none'; $('input').focus(); });
+
+    $('copy').addEventListener('click', function (e) {
+      var btn = e.currentTarget, text = $('output').value;
+      if (!text) return;
+      var done = function () { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+      else { $('output').select(); try { document.execCommand('copy'); done(); } catch (x) {} }
+    });
+  </script>
+</body>
+</html>

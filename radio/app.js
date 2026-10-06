@@ -1,0 +1,1793 @@
+const PRODUCT = "reecehaigh.com radio";
+const VERSION = "1.0";
+
+// Base URL for every Plex API / media request. "/plex" is a same-origin
+// Cloudflare Worker (see ../radio-worker/) that proxies to the Plex server and
+// rewrites the CORS header Plex otherwise pins to https://app.plex.tv — which
+// is what stops this page, served from https://reecehaigh.com, from calling a
+// Plex server directly in the browser. Because the Worker resolves the server
+// itself (preferring the Relay node), the client-side discovery below is
+// skipped while this is set. Set to "" to fall back to direct discovery.
+const PLEX_BASE_URL = "/plex";
+
+// iOS Safari's address/tab bar shows and hides as you scroll, and CSS vh/dvh
+// units don't reliably track that across iOS Safari versions — visualViewport
+// (or innerHeight as a fallback) does. Drives the --vh custom property that
+// .screen's height is calculated from.
+function setViewportHeight() {
+  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty("--vh", `${h * 0.01}px`);
+}
+setViewportHeight();
+window.addEventListener("resize", setViewportHeight);
+window.addEventListener("orientationchange", setViewportHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", setViewportHeight);
+}
+
+const store = {
+  get clientId() {
+    let id = localStorage.getItem("plex_client_id");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("plex_client_id", id);
+    }
+    return id;
+  },
+  get token() { return localStorage.getItem("plex_token"); },
+  set token(v) { v ? localStorage.setItem("plex_token", v) : localStorage.removeItem("plex_token"); },
+  get server() {
+    const raw = localStorage.getItem("plex_server");
+    return raw ? JSON.parse(raw) : null;
+  },
+  set server(v) { v ? localStorage.setItem("plex_server", JSON.stringify(v)) : localStorage.removeItem("plex_server"); },
+  get musicSectionKey() { return localStorage.getItem("plex_music_section"); },
+  set musicSectionKey(v) { v ? localStorage.setItem("plex_music_section", v) : localStorage.removeItem("plex_music_section"); },
+  get shuffle() { return localStorage.getItem("plex_shuffle") === "1"; },
+  set shuffle(v) { localStorage.setItem("plex_shuffle", v ? "1" : "0"); },
+  get repeatMode() { return localStorage.getItem("plex_repeat") || "off"; },
+  set repeatMode(v) { localStorage.setItem("plex_repeat", v); },
+  get radioMode() { return localStorage.getItem("plex_radio") === "1"; },
+  set radioMode(v) { localStorage.setItem("plex_radio", v ? "1" : "0"); },
+  // Defaults on — most people want smooth transitions once the feature exists.
+  get crossfade() { return localStorage.getItem("plex_crossfade") !== "0"; },
+  set crossfade(v) { localStorage.setItem("plex_crossfade", v ? "1" : "0"); },
+  get volume() {
+    const v = parseFloat(localStorage.getItem("plex_volume"));
+    return isFinite(v) ? v : 1;
+  },
+  set volume(v) { localStorage.setItem("plex_volume", String(v)); },
+  // The in-progress queue/track/position — restored on reopen so a killed
+  // background tab (very common for an iOS PWA) or a plain refresh doesn't
+  // throw away what was playing.
+  get playbackState() {
+    const raw = localStorage.getItem("plex_playback_state");
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  },
+  set playbackState(v) {
+    if (!v) { localStorage.removeItem("plex_playback_state"); return; }
+    // A big "All Tracks" queue serialized every few seconds can occasionally
+    // blow the localStorage quota — that's fine, resuming is a nice-to-have,
+    // not worth surfacing an error over.
+    try { localStorage.setItem("plex_playback_state", JSON.stringify(v)); } catch (e) { /* ignore */ }
+  },
+};
+
+// ---------- Plex OAuth ----------
+
+async function plexLogin(statusEl) {
+  // Open the popup synchronously on the click, before any await, so
+  // browsers don't treat it as an unrequested popup and block it.
+  const popup = window.open("", "plex-auth", "width=480,height=700");
+
+  const headers = {
+    "Accept": "application/json",
+    "X-Plex-Product": PRODUCT,
+    "X-Plex-Version": VERSION,
+    "X-Plex-Client-Identifier": store.clientId,
+  };
+
+  statusEl.textContent = "Requesting sign-in code…";
+  const pinRes = await fetch("https://plex.tv/api/v2/pins", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
+    body: "strong=true",
+  });
+  const pin = await pinRes.json();
+
+  const authUrl = `https://app.plex.tv/auth#?clientID=${encodeURIComponent(store.clientId)}` +
+    `&code=${encodeURIComponent(pin.code)}` +
+    `&context[device][product]=${encodeURIComponent(PRODUCT)}`;
+
+  if (popup && !popup.closed) {
+    popup.location.href = authUrl;
+  } else {
+    window.open(authUrl, "plex-auth", "width=480,height=700");
+  }
+  statusEl.textContent = "Waiting for you to sign in…";
+
+  const token = await new Promise((resolve, reject) => {
+    const start = Date.now();
+    const interval = setInterval(async () => {
+      if (Date.now() - start > 3 * 60 * 1000) {
+        clearInterval(interval);
+        reject(new Error("Sign-in timed out"));
+        return;
+      }
+      try {
+        const r = await fetch(`https://plex.tv/api/v2/pins/${pin.id}`, { headers });
+        const data = await r.json();
+        if (data.authToken) {
+          clearInterval(interval);
+          resolve(data.authToken);
+        }
+      } catch (e) { /* keep polling */ }
+    }, 2000);
+  });
+
+  if (popup && !popup.closed) popup.close();
+  store.token = token;
+  return token;
+}
+
+// ---------- Plex API ----------
+
+class PlexAPI {
+  constructor(baseUrl, token) {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.token = token;
+  }
+
+  async get(path) {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    const data = await res.json();
+    return data.MediaContainer;
+  }
+
+  async request(method, path) {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`, {
+      method,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    const text = await res.text();
+    if (!text) return null;
+    try { return JSON.parse(text).MediaContainer; } catch (e) { return null; }
+  }
+
+  async getRawText(path) {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`);
+    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    return res.text();
+  }
+
+  thumbUrl(thumbPath, size = 300) {
+    if (!thumbPath) return "";
+    const url = encodeURIComponent(thumbPath);
+    return `${this.baseUrl}/photo/:/transcode?width=${size}&height=${size}&minSize=1&upscale=1&url=${url}&X-Plex-Token=${this.token}`;
+  }
+
+  streamUrl(part) {
+    return `${this.baseUrl}${part.key}?X-Plex-Token=${this.token}`;
+  }
+
+  transcodeUrl(track) {
+    const path = encodeURIComponent(`/library/metadata/${track.ratingKey}`);
+    return `${this.baseUrl}/music/:/transcode/universal/start.mp3?path=${path}` +
+      `&mediaIndex=0&partIndex=0&protocol=http&fastSeek=1&directPlay=0&directStream=0&audioBoost=100` +
+      `&X-Plex-Client-Identifier=${store.clientId}&X-Plex-Product=${encodeURIComponent(PRODUCT)}` +
+      `&X-Plex-Token=${this.token}`;
+  }
+
+  getMusicSections() {
+    return this.get("/library/sections").then(c =>
+      (c.Directory || []).filter(d => d.type === "artist")
+    );
+  }
+
+  getArtists(sectionKey) {
+    return this.get(`/library/sections/${sectionKey}/all`).then(c => c.Metadata || []);
+  }
+
+  getRecentlyAdded(sectionKey) {
+    return this.get(`/library/sections/${sectionKey}/recentlyAdded`).then(c => c.Metadata || []);
+  }
+
+  getPlaylists() {
+    return this.get("/playlists?playlistType=audio").then(c =>
+      (c.Metadata || []).filter(p => p.playlistType === "audio")
+    );
+  }
+
+  getPlaylistItems(ratingKey) {
+    return this.get(`/playlists/${ratingKey}/items`).then(c => c.Metadata || []);
+  }
+
+  // Playlist item URIs are addressed as server://<machineIdentifier>/... rather
+  // than by plain ratingKey — cached since it's the same for every call in a
+  // session and each lookup is one more round trip before the action completes.
+  async getMachineIdentifier() {
+    if (!this._machineId) {
+      const c = await this.get("/");
+      this._machineId = c.machineIdentifier;
+    }
+    return this._machineId;
+  }
+
+  async createPlaylist(title, ratingKey) {
+    const machineId = await this.getMachineIdentifier();
+    const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
+    const c = await this.request("POST", `/playlists?type=audio&smart=0&title=${encodeURIComponent(title)}&uri=${uri}`);
+    return c?.Metadata?.[0];
+  }
+
+  async addToPlaylist(playlistRatingKey, ratingKey) {
+    const machineId = await this.getMachineIdentifier();
+    const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
+    await this.request("PUT", `/playlists/${playlistRatingKey}/items?uri=${uri}`);
+  }
+
+  getFacet(sectionKey, facet, type) {
+    return this.get(`/library/sections/${sectionKey}/${facet}?type=${type}`).then(c => c.Directory || []);
+  }
+
+  getFilteredItems(sectionKey, filterField, tagKey, resultType) {
+    return this.get(`/library/sections/${sectionKey}/all?type=${resultType}&${filterField}=${tagKey}`).then(c => c.Metadata || []);
+  }
+
+  getTrackCount(sectionKey) {
+    return this.get(`/library/sections/${sectionKey}/all?type=10&X-Plex-Container-Start=0&X-Plex-Container-Size=0`)
+      .then(c => c.totalSize ?? 0);
+  }
+
+  getAllTracks(sectionKey) {
+    return this.get(`/library/sections/${sectionKey}/all?type=10`).then(c => c.Metadata || []);
+  }
+
+  getFolder(sectionKey, parentId) {
+    const q = parentId ? `?parent=${parentId}` : "";
+    return this.get(`/library/sections/${sectionKey}/folder${q}`).then(c => c.Metadata || []);
+  }
+
+  getSonicallySimilar(ratingKey, limit = 20) {
+    return this.get(`/library/metadata/${ratingKey}/nearest?type=10&limit=${limit}`).then(c => c.Metadata || []);
+  }
+
+  reportScrobble(ratingKey) {
+    // Marks a track as played (view count / recently-played history in Plex
+    // itself) — fire-and-forget, matches what Plexamp and the official
+    // clients do once a track has mostly finished playing.
+    const url = `${this.baseUrl}/:/scrobble?key=${ratingKey}&identifier=com.plexapp.plugins.library&X-Plex-Token=${this.token}`;
+    fetch(url).catch(() => {});
+  }
+
+  getChildren(ratingKey) {
+    return this.get(`/library/metadata/${ratingKey}/children`).then(c => c.Metadata || []);
+  }
+
+  search(sectionKey, query) {
+    return this.get(`/library/sections/${sectionKey}/search?query=${encodeURIComponent(query)}&type=10`)
+      .then(c => c.Metadata || []);
+  }
+}
+
+// ---------- Server discovery ----------
+
+// Plex re-picks which relay node a token gets assigned to on each fresh
+// /api/v2/resources lookup, and some relay nodes reject a token outright
+// (raw connection failure, not even a clean 401) — seen in practice for a
+// token from a share accepted only minutes earlier, while a long-established
+// token sails through the same node fine. Re-querying resources from scratch
+// a few times gives a real chance of landing on a relay node that accepts
+// this token, rather than giving up after whatever assignment came first.
+async function discoverServer(token, onAttempt) {
+  const attempts = 3;
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    if (onAttempt) onAttempt(i + 1, attempts);
+    try {
+      return await discoverServerOnce(token);
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr;
+}
+
+async function discoverServerOnce(token) {
+  const res = await fetch("https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1", {
+    headers: {
+      Accept: "application/json",
+      "X-Plex-Token": token,
+      "X-Plex-Client-Identifier": store.clientId,
+      // Identify as a full client — plex.tv is more consistent about handing
+      // back the relay connection and the complete connection list when the
+      // request carries the same product/version as the sign-in call.
+      "X-Plex-Product": PRODUCT,
+      "X-Plex-Version": VERSION,
+    },
+  });
+  const resources = await res.json();
+  const servers = resources.filter(r => (r.provides || "").includes("server"));
+
+  // Plex running with `network_mode: host` alongside other Docker projects
+  // reports every bridge-network gateway (172.16.0.0/12) to plex.tv as a
+  // "local" connection. None are ever reachable from a real client, and each
+  // dead address otherwise burns a full probe timeout — drop them outright.
+  const isDockerBridgeIP = (uri) => {
+    const m = uri.match(/https?:\/\/(\d+)-(\d+)-\d+-\d+\./);
+    if (!m) return false;
+    const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+    return a === 172 && b >= 16 && b <= 31;
+  };
+
+  // Priority tiers: LAN first (fastest at home), then a direct remote
+  // connection, then Plex Relay last — relay is bandwidth-capped and resets
+  // sustained audio streams, but it's the only path that works for a remote
+  // listener when the server has a dynamic public IP and no port forwarding.
+  // Relay nodes are also slow to first byte and rotate per lookup, so give
+  // them a longer timeout.
+  const tierOf = (c) => c.relay ? 2 : (c.local ? 0 : 1);
+  const timeoutFor = (c) => c.relay ? 12000 : 6000;
+
+  const probe = async (uri, ms) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const r = await fetch(`${uri}/identity?X-Plex-Token=${token}`, { signal: controller.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return true;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const failures = [];
+  for (const server of servers) {
+    // De-dupe by URI and drop the Docker bridge noise before probing.
+    const seen = new Set();
+    const conns = (server.connections || []).filter((c) => {
+      if (!c.uri || seen.has(c.uri) || isDockerBridgeIP(c.uri)) return false;
+      seen.add(c.uri);
+      return true;
+    });
+    if (!conns.some((c) => c.relay)) {
+      failures.push(`${server.name} → plex.tv offered no relay connection for this token`);
+    }
+
+    // One tier at a time; every candidate in a tier is probed in parallel so
+    // a single dead address can't hold up a live one behind it.
+    for (const tier of [0, 1, 2]) {
+      const group = conns.filter((c) => tierOf(c) === tier);
+      if (!group.length) continue;
+      const results = await Promise.allSettled(
+        group.map((c) => probe(c.uri, timeoutFor(c)).then(() => c))
+      );
+      const hit = results.find((r) => r.status === "fulfilled");
+      if (hit) {
+        const c = hit.value;
+        console.log(`Plex: using ${c.uri}`, { local: !!c.local, relay: !!c.relay });
+        return { name: server.name, uri: c.uri, relay: !!c.relay };
+      }
+      results.forEach((r, i) => {
+        const e = r.reason;
+        const why = e && (e.name === "AbortError" || e.name === "TimeoutError")
+          ? "timed out"
+          : (e && e.message) || String(e);
+        failures.push(`${group[i].uri} → ${why}`);
+      });
+    }
+  }
+  console.warn("Plex server discovery failed for these connections:", failures);
+  const err = new Error(
+    servers.length
+      ? `Could not reach any Plex server (${failures.length} attempted). If you're not on ` +
+        `the server's home network, the owner needs Plex Relay enabled or a reachable remote connection.`
+      : "Your Plex account has no shared servers — check the share invite was accepted"
+  );
+  err.details = failures;
+  throw err;
+}
+
+// ---------- App state ----------
+
+let api = null;
+let musicSectionKey = null;
+let queue = [];       // current list of tracks, natural order
+let order = [];       // playback order — indices into `queue`
+let orderPos = -1;    // position within `order`
+let shuffleOn = store.shuffle;
+let repeatMode = store.repeatMode; // "off" | "all" | "one"
+let scrobbledCurrent = false; // whether the current track has already been reported played to Plex
+let radioOn = store.radioMode;
+let crossfadeOn = store.crossfade;
+let folderStack = [{ parentId: null, label: "Folders" }];
+
+const LIBRARY_CATEGORIES = [
+  { id: "genre-artist", label: "Artist Genres", noun: "genres", facet: "genre", facetType: 8, filterField: "genre", resultType: 8 },
+  { id: "genre-album", label: "Album Genres", noun: "genres", facet: "genre", facetType: 9, filterField: "genre", resultType: 9 },
+  { id: "style", label: "Styles", noun: "styles", facet: "style", facetType: 9, filterField: "style", resultType: 9 },
+  { id: "mood", label: "Moods", noun: "moods", facet: "mood", facetType: 9, filterField: "mood", resultType: 9 },
+  { id: "label", label: "Record Labels", noun: "labels", facet: "studio", facetType: 9, filterField: "studio", resultType: 9 },
+];
+
+const el = (id) => document.getElementById(id);
+
+// Two <audio> elements so the next track can be preloaded — and, with
+// crossfade on, faded in — while the current one is still playing. `audio`
+// always points at whichever element is presently audible/current; `standby`
+// is the other one, used to buffer (and optionally fade in) the upcoming
+// track ahead of time. A hard-cut transition (manual skip, initial track
+// load) just reuses `audio` in place and clears out `standby`.
+const audioA = el("audio");
+const audioB = el("audio-b");
+audioA.preload = "auto";
+audioB.preload = "auto";
+let audio = audioA;
+let standby = audioB;
+let userVolume = store.volume;
+audioA.volume = userVolume;
+function setActiveElement(elx) {
+  audio = elx;
+  standby = elx === audioA ? audioB : audioA;
+}
+
+function formatTime(sec) {
+  if (!isFinite(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+function fmtDuration(ms) {
+  return formatTime((ms || 0) / 1000);
+}
+
+// ---------- Rendering ----------
+
+function renderArtistCard(artist) {
+  const div = document.createElement("div");
+  div.className = "card artist";
+  div.innerHTML = `
+    <img loading="lazy" src="${api.thumbUrl(artist.thumb)}" alt="">
+    <div class="card-title">${artist.title}</div>
+  `;
+  div.onclick = () => showArtist(artist);
+  return div;
+}
+
+function renderPlaylistCard(playlist) {
+  const div = document.createElement("div");
+  div.className = "card";
+  const count = playlist.leafCount != null ? `${playlist.leafCount} track${playlist.leafCount === 1 ? "" : "s"}` : "";
+  div.innerHTML = `
+    <img loading="lazy" src="${api.thumbUrl(playlist.composite || playlist.thumb)}" alt="">
+    <div class="card-title">${playlist.title}</div>
+    <div class="card-sub">${count}</div>
+  `;
+  div.onclick = () => showPlaylistDetail(playlist);
+  return div;
+}
+
+function renderAlbumCard(album) {
+  const div = document.createElement("div");
+  div.className = "card";
+  div.innerHTML = `
+    <img loading="lazy" src="${api.thumbUrl(album.thumb)}" alt="">
+    <div class="card-title">${album.title}</div>
+    <div class="card-sub">${album.parentTitle || ""}</div>
+  `;
+  div.onclick = () => showAlbum(album);
+  return div;
+}
+
+function switchView(view) {
+  document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  el(`view-${view}`).classList.remove("hidden");
+  const btn = document.querySelector(`.nav-btn[data-view="${view}"]`);
+  if (btn) btn.classList.add("active");
+}
+
+async function showHome() {
+  switchView("home");
+  const container = el("view-home");
+  container.innerHTML = `<div class="section-heading">Recently Added</div><div class="grid" id="home-grid"></div>`;
+  const grid = el("home-grid");
+  const items = await api.getRecentlyAdded(musicSectionKey);
+  items.slice(0, 24).forEach(item => grid.appendChild(renderAlbumCard(item)));
+}
+
+async function showArtists() {
+  switchView("artists");
+  const container = el("view-artists");
+  container.innerHTML = `<div class="section-heading">Artists</div><div class="grid" id="artists-grid"></div>`;
+  const grid = el("artists-grid");
+  const artists = await api.getArtists(musicSectionKey);
+  artists
+    .sort((a, b) => a.titleSort?.localeCompare(b.titleSort) ?? a.title.localeCompare(b.title))
+    .forEach(a => grid.appendChild(renderArtistCard(a)));
+}
+
+async function showAlbums() {
+  switchView("albums");
+  const container = el("view-albums");
+  container.innerHTML = `<div class="section-heading">Albums</div><div class="grid" id="albums-grid"></div>`;
+  const grid = el("albums-grid");
+  const artists = await api.getArtists(musicSectionKey);
+  const albumLists = await Promise.all(artists.map(a => api.getChildren(a.ratingKey)));
+  const albums = albumLists.flat().sort((a, b) => (b.originallyAvailableAt || "").localeCompare(a.originallyAvailableAt || ""));
+  albums.forEach(al => grid.appendChild(renderAlbumCard(al)));
+}
+
+async function showArtist(artist) {
+  switchView("albums");
+  const container = el("view-albums");
+  container.innerHTML = `
+    <button class="back-btn" id="artist-back">&larr; Back</button>
+    <div class="section-heading">${artist.title}</div>
+    <div class="grid" id="artist-albums-grid"></div>
+  `;
+  el("artist-back").onclick = showArtists;
+  const grid = el("artist-albums-grid");
+  const albums = await api.getChildren(artist.ratingKey);
+  albums
+    .sort((a, b) => (a.originallyAvailableAt || "").localeCompare(b.originallyAvailableAt || ""))
+    .forEach(al => grid.appendChild(renderAlbumCard(al)));
+}
+
+async function showAlbum(album) {
+  switchView("album-detail");
+  const container = el("view-album-detail");
+  container.innerHTML = `
+    <button class="back-btn" id="album-back">&larr; Back</button>
+    <div class="album-header">
+      <img src="${api.thumbUrl(album.thumb, 400)}" alt="">
+      <div>
+        <h2>${album.title}</h2>
+        <div class="sub">${album.parentTitle || ""}${album.year ? " · " + album.year : ""}</div>
+      </div>
+    </div>
+    <div id="track-list"></div>
+  `;
+  el("album-back").onclick = () => showAlbums();
+
+  const tracks = await api.getChildren(album.ratingKey);
+  const list = el("track-list");
+  tracks.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.dataset.ratingKey = track.ratingKey;
+    row.innerHTML = `
+      <div class="idx">${track.index || i + 1}</div>
+      <div class="title">${track.title}</div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+    `;
+    row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
+    list.appendChild(row);
+  });
+}
+
+async function showPlaylists() {
+  switchView("playlists");
+  const container = el("view-playlists");
+  container.innerHTML = `<div class="section-heading">Playlists</div><div class="grid" id="playlists-grid"></div>`;
+  const grid = el("playlists-grid");
+  const playlists = await api.getPlaylists();
+  if (!playlists.length) {
+    grid.outerHTML = `<p style="color:var(--text-dim)">No playlists yet.</p>`;
+    return;
+  }
+  playlists
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .forEach(p => grid.appendChild(renderPlaylistCard(p)));
+}
+
+async function showPlaylistDetail(playlist) {
+  switchView("playlist-detail");
+  const container = el("view-playlist-detail");
+  container.innerHTML = `
+    <button class="back-btn" id="playlist-back">&larr; Back</button>
+    <div class="section-heading">${playlist.title}</div>
+    <div id="playlist-track-list"></div>
+  `;
+  el("playlist-back").onclick = () => showPlaylists();
+
+  const tracks = await api.getPlaylistItems(playlist.ratingKey);
+  const list = el("playlist-track-list");
+  tracks.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.dataset.ratingKey = track.ratingKey;
+    row.innerHTML = `
+      <div class="idx">${i + 1}</div>
+      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+    `;
+    row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
+    list.appendChild(row);
+  });
+}
+
+function renderSimpleRow(title, sub, onClick) {
+  const row = document.createElement("div");
+  row.className = "simple-row";
+  row.innerHTML = `
+    <div>
+      <div class="row-title">${title}</div>
+      ${sub ? `<div class="row-sub">${sub}</div>` : ""}
+    </div>
+    <div class="row-chevron">&rsaquo;</div>
+  `;
+  row.onclick = onClick;
+  return row;
+}
+
+async function showLibrary() {
+  switchView("library");
+  const container = el("view-library");
+  container.innerHTML = `<div class="section-heading">Library</div><div id="library-rows"></div>`;
+  const rows = el("library-rows");
+
+  LIBRARY_CATEGORIES.forEach(async (cat) => {
+    const row = renderSimpleRow(cat.label, "…", () => showTagList(cat));
+    rows.appendChild(row);
+    try {
+      const tags = await api.getFacet(musicSectionKey, cat.facet, cat.facetType);
+      row.querySelector(".row-sub").textContent = `${tags.length} ${cat.noun}`;
+    } catch (e) {
+      row.querySelector(".row-sub").textContent = "unavailable";
+    }
+  });
+
+  const foldersRow = renderSimpleRow("Folders", "…", () => {
+    folderStack = [{ parentId: null, label: "Folders" }];
+    showFolder();
+  });
+  rows.appendChild(foldersRow);
+  api.getFolder(musicSectionKey).then(items => {
+    foldersRow.querySelector(".row-sub").textContent = `${items.length} folders`;
+  });
+
+  const tracksRow = renderSimpleRow("All Tracks", "…", () => showAllTracks());
+  rows.appendChild(tracksRow);
+  api.getTrackCount(musicSectionKey).then(count => {
+    tracksRow.querySelector(".row-sub").textContent = `${count} tracks`;
+  });
+}
+
+async function showTagList(category) {
+  switchView("tag-list");
+  const container = el("view-tag-list");
+  container.innerHTML = `
+    <button class="back-btn" id="tag-list-back">&larr; Back</button>
+    <div class="section-heading">${category.label}</div>
+    <div id="tag-list-rows"></div>
+  `;
+  el("tag-list-back").onclick = () => showLibrary();
+  const rows = el("tag-list-rows");
+  const tags = await api.getFacet(musicSectionKey, category.facet, category.facetType);
+  tags
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .forEach(tag => rows.appendChild(renderSimpleRow(tag.title, "", () => showTagDetail(category, tag))));
+}
+
+async function showTagDetail(category, tag) {
+  switchView("tag-detail");
+  const container = el("view-tag-detail");
+  container.innerHTML = `
+    <button class="back-btn" id="tag-detail-back">&larr; Back</button>
+    <div class="section-heading">${tag.title}</div>
+    <div class="grid" id="tag-detail-grid"></div>
+  `;
+  el("tag-detail-back").onclick = () => showTagList(category);
+  const grid = el("tag-detail-grid");
+  const items = await api.getFilteredItems(musicSectionKey, category.filterField, tag.key, category.resultType);
+  items.forEach(item => {
+    grid.appendChild(category.resultType === 8 ? renderArtistCard(item) : renderAlbumCard(item));
+  });
+}
+
+async function showAllTracks() {
+  switchView("all-tracks");
+  const container = el("view-all-tracks");
+  container.innerHTML = `<div class="section-heading">All Tracks</div><div id="all-tracks-list"></div>`;
+  const list = el("all-tracks-list");
+  const tracks = await api.getAllTracks(musicSectionKey);
+  tracks.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.dataset.ratingKey = track.ratingKey;
+    row.innerHTML = `
+      <div class="idx">♪</div>
+      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+    `;
+    row.onclick = () => playQueue(tracks, i);
+    wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
+    list.appendChild(row);
+  });
+}
+
+async function showFolder() {
+  switchView("folder");
+  const current = folderStack[folderStack.length - 1];
+  const container = el("view-folder");
+  const canGoBack = folderStack.length > 1;
+  container.innerHTML = `
+    ${canGoBack ? `<button class="back-btn" id="folder-back">&larr; Back</button>` : ""}
+    <div class="section-heading">${current.label}</div>
+    <div id="folder-rows"></div>
+  `;
+  if (canGoBack) {
+    el("folder-back").onclick = () => {
+      folderStack.pop();
+      showFolder();
+    };
+  }
+  const rows = el("folder-rows");
+  const items = await api.getFolder(musicSectionKey, current.parentId);
+  const tracks = items.filter(i => i.type === "track");
+
+  items.forEach(item => {
+    if (item.type === "track") {
+      const idx = tracks.indexOf(item);
+      const row = document.createElement("div");
+      row.className = "track-row";
+      row.dataset.ratingKey = item.ratingKey;
+      row.innerHTML = `
+        <div class="idx">♪</div>
+        <div class="title">${item.title}</div>
+        <div class="dur">${fmtDuration(item.duration)}</div>
+        <button class="add-to-queue-btn" title="Add to queue">+</button>
+        <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+      `;
+      row.onclick = () => playQueue(tracks, idx);
+      wireAddToQueueButton(row, item);
+      wireAddToPlaylistButton(row, item);
+      rows.appendChild(row);
+    } else {
+      const match = (item.key || "").match(/parent=(\d+)/);
+      const parentId = match ? match[1] : null;
+      rows.appendChild(renderSimpleRow(item.title, "", () => {
+        folderStack.push({ parentId, label: item.title });
+        showFolder();
+      }));
+    }
+  });
+}
+
+async function showSearchResults(query) {
+  switchView("search");
+  const container = el("view-search");
+  container.innerHTML = `<div class="section-heading">Results for "${query}"</div><div id="search-tracks"></div>`;
+  const results = await api.search(musicSectionKey, query);
+  const list = el("search-tracks");
+  results.forEach((track, i) => {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.innerHTML = `
+      <div class="idx">♪</div>
+      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="dur">${fmtDuration(track.duration)}</div>
+      <button class="add-to-queue-btn" title="Add to queue">+</button>
+      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
+    `;
+    row.onclick = () => playQueue(results, i);
+    wireAddToQueueButton(row, track);
+    wireAddToPlaylistButton(row, track);
+    list.appendChild(row);
+  });
+}
+
+// ---------- Playback ----------
+
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildOrder(length, startIndex) {
+  const all = Array.from({ length }, (_, i) => i);
+  if (!shuffleOn) return all;
+  const rest = all.filter(i => i !== startIndex);
+  return [startIndex, ...shuffleArray(rest)];
+}
+
+function playQueue(tracks, index) {
+  queue = tracks;
+  order = buildOrder(tracks.length, index);
+  orderPos = shuffleOn ? 0 : index;
+  playCurrent();
+}
+
+function playCurrent() {
+  // Hard cut: reload the currently-active element in place and drop whatever
+  // was buffered in the standby element, since queue state just jumped
+  // (manual skip, track click, initial load) rather than progressing naturally.
+  abortTransition();
+  const track = queue[order[orderPos]];
+  if (!track) return;
+  const part = track.Media?.[0]?.Part?.[0];
+  if (!part) return;
+
+  audio.pause();
+  audio.src = api.streamUrl(part);
+  audio.play().catch(() => {});
+  syncNowPlayingUI(track);
+  highlightPlayingRow(track.ratingKey);
+  scrobbledCurrent = false;
+  savePlaybackState();
+}
+
+function highlightPlayingRow(ratingKey) {
+  document.querySelectorAll(".track-row").forEach(r => {
+    r.classList.toggle("playing", r.dataset.ratingKey === String(ratingKey));
+  });
+}
+
+function setPlayIcon(isPlaying) {
+  const icon = isPlaying ? "⏸" : "▶";
+  el("np-play").textContent = icon;
+  el("fs-play").textContent = icon;
+}
+
+function syncNowPlayingUI(track) {
+  const artist = track.grandparentTitle || track.originalTitle || "";
+  const artUrl = api.thumbUrl(track.parentThumb || track.thumb, 80);
+  const artUrlLarge = api.thumbUrl(track.parentThumb || track.thumb, 600);
+
+  el("np-title").textContent = track.title;
+  el("np-artist").textContent = artist;
+  el("np-art").src = artUrl;
+
+  el("fs-title").textContent = track.title;
+  el("fs-artist").textContent = track.parentTitle ? `${artist} — ${track.parentTitle}` : artist;
+  el("fs-art").src = artUrlLarge;
+
+  setPlayIcon(true);
+  updateMediaSessionMetadata(track, artUrlLarge);
+  loadLyricsForTrack(track);
+  refreshQueueViewIfOpen();
+}
+
+// ---------- Lyrics ----------
+
+let currentLyrics = null;   // [{time, text}] for whichever track last loaded successfully
+let lastLyricsTrackKey = null;
+let lastLyricsLineIndex = -1;
+
+function findLyricsStreamKey(track) {
+  const stream = track.Media?.[0]?.Part?.[0]?.Stream?.find(s => s.format === "lrc" || s.codec === "lrc");
+  return stream?.key || null;
+}
+
+function parseLRC(text) {
+  const lines = text.split("\n");
+  const timeRe = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+  const result = [];
+  for (const line of lines) {
+    const matches = [...line.matchAll(timeRe)];
+    if (!matches.length) continue; // metadata header lines like [au:...] have no numeric time
+    const lyricText = line.replace(timeRe, "").trim();
+    for (const m of matches) {
+      result.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: lyricText });
+    }
+  }
+  return result.sort((a, b) => a.time - b.time);
+}
+
+async function loadLyricsForTrack(track) {
+  lastLyricsTrackKey = track.ratingKey;
+  currentLyrics = null;
+  lastLyricsLineIndex = -1;
+  el("fs-lyrics-toggle").classList.add("hidden");
+  el("fs-lyrics-lines").innerHTML = "";
+
+  const streamKey = findLyricsStreamKey(track);
+  if (!streamKey) {
+    if (fsViewMode === "lyrics") showFsView("now-playing");
+    return;
+  }
+  try {
+    const text = await api.getRawText(streamKey);
+    if (lastLyricsTrackKey !== track.ratingKey) return; // track changed again while this was in flight
+    currentLyrics = parseLRC(text);
+    el("fs-lyrics-toggle").classList.remove("hidden");
+    renderLyricsLines();
+  } catch (e) {
+    currentLyrics = null;
+  }
+}
+
+function renderLyricsLines() {
+  const container = el("fs-lyrics-lines");
+  container.innerHTML = "";
+  if (!currentLyrics || !currentLyrics.length) {
+    container.innerHTML = `<p style="color:var(--text-dim); text-align:center;">No lyrics for this track.</p>`;
+    return;
+  }
+  currentLyrics.forEach(line => {
+    const div = document.createElement("div");
+    div.className = "lyrics-line";
+    div.textContent = line.text || "♪";
+    container.appendChild(div);
+  });
+}
+
+function updateLyricsHighlight() {
+  if (!currentLyrics || !currentLyrics.length || fsViewMode !== "lyrics") return;
+  const t = audio.currentTime;
+  let idx = -1;
+  for (let i = 0; i < currentLyrics.length; i++) {
+    if (currentLyrics[i].time <= t) idx = i; else break;
+  }
+  if (idx === lastLyricsLineIndex) return;
+  lastLyricsLineIndex = idx;
+  const lines = el("fs-lyrics-lines").children;
+  for (let i = 0; i < lines.length; i++) lines[i].classList.toggle("current", i === idx);
+  if (idx >= 0 && lines[idx]) lines[idx].scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+// ---------- Full-screen view modes: now-playing / lyrics / queue ----------
+
+let fsViewMode = "now-playing";
+
+function showFsView(mode) {
+  fsViewMode = mode;
+  el("fs-main-view").classList.toggle("hidden", mode !== "now-playing");
+  el("fs-lyrics-view").classList.toggle("hidden", mode !== "lyrics");
+  el("fs-queue-view").classList.toggle("hidden", mode !== "queue");
+  el("fs-lyrics-toggle").classList.toggle("active", mode === "lyrics");
+  el("fs-queue-toggle").classList.toggle("active", mode === "queue");
+  if (mode === "lyrics") { lastLyricsLineIndex = -1; updateLyricsHighlight(); }
+  if (mode === "queue") renderQueueView();
+}
+
+// ---------- Queue management ----------
+
+function addToQueue(track) {
+  queue.push(track);
+  order.push(queue.length - 1);
+  showToast(`Added "${track.title}" to queue`);
+  refreshQueueViewIfOpen();
+  savePlaybackState();
+}
+
+function wireAddToQueueButton(row, track) {
+  const btn = row.querySelector(".add-to-queue-btn");
+  if (btn) btn.onclick = (e) => { e.stopPropagation(); addToQueue(track); };
+}
+
+function wireAddToPlaylistButton(row, track) {
+  const btn = row.querySelector(".add-to-playlist-btn");
+  if (btn) btn.onclick = (e) => { e.stopPropagation(); openPlaylistPicker(track); };
+}
+
+// ---------- "Add to playlist" picker ----------
+
+let playlistPickerTrack = null;
+
+async function openPlaylistPicker(track) {
+  playlistPickerTrack = track;
+  el("playlist-picker-new-name").value = "";
+  el("playlist-picker-backdrop").classList.remove("hidden");
+  el("playlist-picker").classList.remove("hidden");
+  const list = el("playlist-picker-list");
+  list.innerHTML = `<p>Loading playlists…</p>`;
+  try {
+    const playlists = await api.getPlaylists();
+    list.innerHTML = "";
+    if (!playlists.length) {
+      list.innerHTML = `<p>No playlists yet — create one below.</p>`;
+      return;
+    }
+    playlists
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .forEach(p => list.appendChild(renderSimpleRow(p.title, "", () => addTrackToExistingPlaylist(p))));
+  } catch (e) {
+    list.innerHTML = `<p>Couldn't load playlists.</p>`;
+  }
+}
+
+function closePlaylistPicker() {
+  playlistPickerTrack = null;
+  el("playlist-picker-backdrop").classList.add("hidden");
+  el("playlist-picker").classList.add("hidden");
+}
+
+async function addTrackToExistingPlaylist(playlist) {
+  const track = playlistPickerTrack;
+  if (!track) return;
+  closePlaylistPicker();
+  try {
+    await api.addToPlaylist(playlist.ratingKey, track.ratingKey);
+    showToast(`Added "${track.title}" to ${playlist.title}`);
+  } catch (e) {
+    showToast(`Couldn't add to ${playlist.title}`);
+  }
+}
+
+async function createPlaylistWithTrack(title) {
+  const track = playlistPickerTrack;
+  if (!track) return;
+  closePlaylistPicker();
+  try {
+    await api.createPlaylist(title, track.ratingKey);
+    showToast(`Created playlist "${title}"`);
+  } catch (e) {
+    showToast(`Couldn't create playlist "${title}"`);
+  }
+}
+
+el("playlist-picker-backdrop").onclick = closePlaylistPicker;
+el("playlist-picker-cancel").onclick = closePlaylistPicker;
+el("playlist-picker-new-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = el("playlist-picker-new-name").value.trim();
+  if (name) createPlaylistWithTrack(name);
+});
+
+function refreshQueueViewIfOpen() {
+  if (fsViewMode === "queue") renderQueueView();
+}
+
+function jumpToQueuePosition(pos) {
+  orderPos = pos;
+  playCurrent();
+}
+
+function moveQueueItem(pos, direction) {
+  const target = pos + direction;
+  if (target <= orderPos || target >= order.length) return;
+  [order[pos], order[target]] = [order[target], order[pos]];
+  renderQueueView();
+  savePlaybackState();
+}
+
+function removeQueueItem(pos) {
+  if (pos <= orderPos) return;
+  order.splice(pos, 1);
+  renderQueueView();
+  savePlaybackState();
+}
+
+function renderQueueView() {
+  const list = el("fs-queue-list");
+  list.innerHTML = "";
+  if (!order.length) {
+    list.innerHTML = `<p style="color:var(--text-dim); text-align:center; padding-top:1em;">Queue is empty.</p>`;
+    return;
+  }
+
+  let sectionShown = { played: false, upNext: false };
+  order.forEach((queueIdx, pos) => {
+    if (pos < orderPos && !sectionShown.played) {
+      sectionShown.played = true;
+      const h = document.createElement("div");
+      h.className = "queue-section-heading";
+      h.textContent = "Played";
+      list.appendChild(h);
+    }
+    if (pos === orderPos) {
+      const h = document.createElement("div");
+      h.className = "queue-section-heading";
+      h.textContent = "Now Playing";
+      list.appendChild(h);
+    }
+    if (pos === orderPos + 1) {
+      const h = document.createElement("div");
+      h.className = "queue-section-heading";
+      h.textContent = "Up Next";
+      list.appendChild(h);
+    }
+
+    const track = queue[queueIdx];
+    const row = document.createElement("div");
+    row.className = "queue-row" + (pos === orderPos ? " current" : "");
+    const canEdit = pos > orderPos;
+    row.innerHTML = `
+      <div class="queue-row-main">
+        <div class="queue-row-title">${track.title}</div>
+        <div class="queue-row-sub">${track.grandparentTitle || ""}</div>
+      </div>
+      <div class="queue-row-actions">
+        ${canEdit ? `<button class="q-up" title="Move up">▲</button><button class="q-down" title="Move down">▼</button><button class="q-remove" title="Remove">✕</button>` : ""}
+      </div>
+    `;
+    row.querySelector(".queue-row-main").onclick = () => jumpToQueuePosition(pos);
+    if (canEdit) {
+      row.querySelector(".q-up").onclick = () => moveQueueItem(pos, -1);
+      row.querySelector(".q-down").onclick = () => moveQueueItem(pos, 1);
+      row.querySelector(".q-remove").onclick = () => removeQueueItem(pos);
+    }
+    list.appendChild(row);
+  });
+}
+
+// Transcode fallback applies to whichever element hit the error — including
+// the standby element while it's silently preloading the next track — so it
+// keys off e.target rather than the closed-over `audio` variable.
+function onAudioError(e) {
+  const el2 = e.target;
+  const track = el2 === audio ? queue[order[orderPos]] : (el2 === standby ? preloadedNextTrack : null);
+  if (!track || el2.dataset.fallback === "1") return;
+  el2.dataset.fallback = "1";
+  el2.src = api.transcodeUrl(track);
+  if (el2 === audio) el2.play().catch(() => {});
+}
+function onAudioLoadstart(e) { e.target.dataset.fallback = ""; }
+[audioA, audioB].forEach((elx) => {
+  elx.addEventListener("error", onAudioError);
+  elx.addEventListener("loadstart", onAudioLoadstart);
+});
+
+// ---------- Gapless / crossfade transition engine ----------
+//
+// `standby` is preloaded with the next track a little before the current one
+// finishes. With crossfade off, that just makes the automatic switch instant
+// (no re-fetch gap). With crossfade on, the last few seconds fade `audio`'s
+// volume down while ramping `standby`'s up, then the two elements swap roles.
+
+const CROSSFADE_SECONDS = 8;
+const PRELOAD_LEAD_SECONDS = 20;
+let preloadTriggered = false;
+let crossfadeTriggered = false;
+let radioExtendTriggered = false;
+let preloadedNextTrack = null;
+let crossfadeRAF = null;
+let lastPlaybackStateSave = 0;
+
+function resetTransitionState() {
+  preloadTriggered = false;
+  crossfadeTriggered = false;
+  radioExtendTriggered = false;
+  preloadedNextTrack = null;
+}
+
+function cancelCrossfade() {
+  if (crossfadeRAF != null) {
+    cancelAnimationFrame(crossfadeRAF);
+    crossfadeRAF = null;
+  }
+}
+
+// Persists the current queue/track/position so reopening the app (a plain
+// refresh, or the far more common case on iOS of the PWA tab getting killed
+// in the background) can pick up right where it left off, instead of
+// dropping the whole queue.
+function savePlaybackState() {
+  if (!queue.length || !order.length) return;
+  store.playbackState = { queue, order, orderPos, currentTime: audio.currentTime || 0 };
+}
+
+function restorePlaybackState() {
+  const saved = store.playbackState;
+  if (!saved || !saved.queue || !saved.queue.length) return;
+  queue = saved.queue;
+  order = Array.isArray(saved.order) && saved.order.length === queue.length ? saved.order : queue.map((_, i) => i);
+  orderPos = Math.min(Math.max(saved.orderPos || 0, 0), order.length - 1);
+  const track = queue[order[orderPos]];
+  const part = track?.Media?.[0]?.Part?.[0];
+  if (!part) return;
+
+  audio.src = api.streamUrl(part);
+  audio.addEventListener("loadedmetadata", () => { audio.currentTime = saved.currentTime || 0; }, { once: true });
+  syncNowPlayingUI(track);
+  highlightPlayingRow(track.ratingKey);
+  setPlayIcon(false); // stays paused until the user presses play — no autoplay on load
+}
+
+// Stops any in-flight crossfade/preload and returns both elements to a clean
+// "audio is the only one that matters" state — used whenever queue state is
+// about to jump around outside the normal end-of-track flow (manual skip,
+// rewinding to the previous track, a fresh playQueue()).
+function abortTransition() {
+  cancelCrossfade();
+  audio.volume = userVolume;
+  standby.pause();
+  standby.removeAttribute("src");
+  standby.load();
+  resetTransitionState();
+}
+
+// What track plays right after the current one, without mutating any state
+// — null if the queue would just stop (or radio hasn't extended it yet).
+function peekNextTrack() {
+  if (orderPos < order.length - 1) return queue[order[orderPos + 1]];
+  if (repeatMode === "all" && order.length) return queue[order[0]];
+  return null;
+}
+
+// Mirrors extendRadioQueue's call site in advance(), but runs proactively —
+// before the current track ends — so a next track is already resolvable by
+// the time preloading/crossfading needs one.
+async function ensureRadioExtension() {
+  if (radioExtendTriggered) return;
+  if (!(radioOn && repeatMode !== "all" && orderPos === order.length - 1)) return;
+  radioExtendTriggered = true;
+  const more = await extendRadioQueue();
+  if (more.length) {
+    const startIndex = queue.length;
+    queue = queue.concat(more);
+    order = order.concat(more.map((_, i) => startIndex + i));
+    refreshQueueViewIfOpen();
+  }
+}
+
+async function prepareStandby() {
+  await ensureRadioExtension();
+  const next = peekNextTrack();
+  if (!next) return;
+  const part = next.Media?.[0]?.Part?.[0];
+  if (!part) return;
+  preloadedNextTrack = next;
+  standby.pause();
+  standby.currentTime = 0;
+  standby.volume = crossfadeOn ? 0 : userVolume;
+  standby.src = api.streamUrl(part);
+  standby.load();
+}
+
+// Advances queue state (orderPos, with all/off-repeat wraparound) to match
+// whatever peekNextTrack() already resolved, and resets the per-track
+// transition flags for the track that's now current.
+function advanceTransitionState() {
+  if (orderPos < order.length - 1) {
+    orderPos++;
+  } else if (repeatMode === "all") {
+    orderPos = 0;
+  }
+  resetTransitionState();
+}
+
+function completeSwap(oldEl) {
+  oldEl.pause();
+  oldEl.removeAttribute("src");
+  oldEl.load();
+  advanceTransitionState();
+  setActiveElement(oldEl === audioA ? audioB : audioA);
+  const track = queue[order[orderPos]];
+  syncNowPlayingUI(track);
+  highlightPlayingRow(track.ratingKey);
+  scrobbledCurrent = false;
+  savePlaybackState();
+}
+
+function beginCrossfade(remaining) {
+  if (!preloadedNextTrack || !standby.src) return; // not ready — natural "ended" will fall back to a hard cut
+  const oldEl = audio;
+  const fadeSeconds = Math.min(CROSSFADE_SECONDS, Math.max(remaining, 0.5));
+  const startVol = oldEl.volume;
+  standby.currentTime = 0;
+  standby.volume = 0;
+  standby.play().catch(() => {});
+  const t0 = performance.now();
+  function tick(now) {
+    const p = Math.min(1, (now - t0) / (fadeSeconds * 1000));
+    oldEl.volume = startVol * (1 - p);
+    standby.volume = userVolume * p;
+    if (p < 1) {
+      crossfadeRAF = requestAnimationFrame(tick);
+    } else {
+      crossfadeRAF = null;
+      completeSwap(oldEl);
+    }
+  }
+  crossfadeRAF = requestAnimationFrame(tick);
+}
+
+function onActiveTimeUpdate() {
+  const track = queue[order[orderPos]];
+  const dur = (track?.duration ? track.duration / 1000 : audio.duration) || 0;
+  if (!dur || !isFinite(dur) || repeatMode === "one") return;
+  const remaining = dur - audio.currentTime;
+
+  if (!preloadTriggered && remaining <= PRELOAD_LEAD_SECONDS) {
+    preloadTriggered = true;
+    prepareStandby();
+  }
+  if (crossfadeOn && !crossfadeTriggered && remaining <= CROSSFADE_SECONDS) {
+    crossfadeTriggered = true;
+    beginCrossfade(remaining);
+  }
+}
+
+function onActiveEnded() {
+  cancelCrossfade();
+  if (repeatMode === "one") {
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+    return;
+  }
+  // If the next track is already buffered in standby (gapless preload, or
+  // crossfade that didn't get enough lead time to finish), swap to it
+  // instantly instead of re-fetching via playCurrent().
+  const next = peekNextTrack();
+  if (next && preloadedNextTrack && preloadedNextTrack.ratingKey === next.ratingKey) {
+    const oldEl = audio;
+    // Gapless (standby idle, not yet started): start it fresh. Crossfade cut
+    // short by the real media ending before the fade animation finished:
+    // standby's already mid-playback, so just bring it up to full volume
+    // rather than restarting it from zero.
+    if (standby.paused) standby.currentTime = 0;
+    standby.volume = userVolume;
+    standby.play().catch(() => {});
+    completeSwap(oldEl);
+    return;
+  }
+  advance(true);
+}
+
+[audioA, audioB].forEach((elx) => {
+  elx.addEventListener("ended", (e) => { if (e.target === audio) onActiveEnded(); });
+  elx.addEventListener("play", (e) => {
+    if (e.target !== audio) return;
+    setPlayIcon(true);
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+  });
+  elx.addEventListener("pause", (e) => {
+    if (e.target !== audio) return;
+    setPlayIcon(false);
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    savePlaybackState();
+  });
+});
+
+// Progress bar / lock-screen position, scrobbling, and lyrics all read off
+// whichever element is currently active. Also drives preloading and the
+// crossfade trigger via onActiveTimeUpdate.
+[audioA, audioB].forEach((elx) => elx.addEventListener("timeupdate", (e) => {
+  if (e.target !== audio) return;
+  onActiveTimeUpdate();
+  if (!audio.duration) return;
+  const pct = (audio.currentTime / audio.duration) * 100;
+  el("np-seek").value = pct;
+  el("fs-seek").value = pct;
+  el("np-time-current").textContent = formatTime(audio.currentTime);
+  el("np-time-total").textContent = formatTime(audio.duration);
+  el("fs-time-current").textContent = formatTime(audio.currentTime);
+  el("fs-time-total").textContent = formatTime(audio.duration);
+
+  if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        playbackRate: audio.playbackRate,
+        position: audio.currentTime,
+      });
+    } catch (e) { /* ignore — some browsers reject edge-case values */ }
+  }
+
+  if (!scrobbledCurrent && pct >= 90) {
+    const track = queue[order[orderPos]];
+    if (track) {
+      scrobbledCurrent = true;
+      api.reportScrobble(track.ratingKey);
+    }
+  }
+
+  updateLyricsHighlight();
+
+  // Cheap enough to just throttle by wall-clock time rather than track a
+  // separate counter — keeps the saved resume position roughly current
+  // without hitting localStorage on every timeupdate tick.
+  const now = Date.now();
+  if (now - lastPlaybackStateSave > 5000) {
+    lastPlaybackStateSave = now;
+    savePlaybackState();
+  }
+}));
+
+// Fetches more tracks to keep an endless "radio" queue going once the
+// current queue runs out — sonically-similar tracks to whatever just played
+// if Plex's analysis has data for it, falling back to a random sample of
+// the library so radio mode never just silently dies.
+async function extendRadioQueue() {
+  const lastTrack = queue[order[order.length - 1]];
+  if (!lastTrack) return [];
+  try {
+    const similar = await api.getSonicallySimilar(lastTrack.ratingKey, 20);
+    const fresh = similar.filter(t => !queue.some(q => q.ratingKey === t.ratingKey));
+    if (fresh.length) return fresh;
+  } catch (e) { /* fall through to the random fallback below */ }
+  try {
+    const all = await api.getAllTracks(musicSectionKey);
+    const fresh = all.filter(t => !queue.some(q => q.ratingKey === t.ratingKey));
+    return shuffleArray(fresh).slice(0, 20);
+  } catch (e) {
+    return [];
+  }
+}
+
+// `auto` is true when called from the "ended" event (respects repeat-one);
+// manual skips via the next button always move forward regardless of it.
+async function advance(auto) {
+  if (auto && repeatMode === "one") {
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+    return;
+  }
+  abortTransition();
+  if (orderPos < order.length - 1) {
+    orderPos++;
+    playCurrent();
+  } else if (repeatMode === "all") {
+    orderPos = 0;
+    playCurrent();
+  } else if (radioOn) {
+    const more = await extendRadioQueue();
+    if (more.length) {
+      const startIndex = queue.length;
+      queue = queue.concat(more);
+      const newIndices = more.map((_, i) => startIndex + i);
+      order = order.concat(newIndices);
+      orderPos++;
+      playCurrent();
+      showToast("📡 Radio: playing similar tracks");
+    } else {
+      showToast("📡 Radio ran out of tracks to suggest");
+      setPlayIcon(false);
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    }
+  } else {
+    setPlayIcon(false);
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+  }
+}
+
+function prevTrack() {
+  if (audio.currentTime > 3) {
+    abortTransition();
+    audio.currentTime = 0;
+    return;
+  }
+  if (orderPos > 0) {
+    orderPos--;
+    playCurrent();
+  } else {
+    abortTransition();
+    audio.currentTime = 0;
+  }
+}
+
+function togglePlay() { audio.paused ? audio.play() : audio.pause(); }
+
+function setShuffle(on) {
+  shuffleOn = on;
+  store.shuffle = on;
+  if (queue.length) {
+    const currentIndex = order[orderPos];
+    if (on) {
+      const rest = queue.map((_, i) => i).filter(i => i !== currentIndex);
+      order = [currentIndex, ...shuffleArray(rest)];
+      orderPos = 0;
+    } else {
+      order = queue.map((_, i) => i);
+      orderPos = currentIndex;
+    }
+  }
+  updateShuffleRepeatUI();
+}
+
+function cycleRepeat() {
+  repeatMode = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
+  store.repeatMode = repeatMode;
+  updateShuffleRepeatUI();
+}
+
+function toggleRadio() {
+  radioOn = !radioOn;
+  store.radioMode = radioOn;
+  updateShuffleRepeatUI();
+  if (radioOn) showToast("📡 Radio mode on — keeps playing similar tracks");
+}
+
+function toggleCrossfade() {
+  crossfadeOn = !crossfadeOn;
+  store.crossfade = crossfadeOn;
+  updateShuffleRepeatUI();
+  showToast(crossfadeOn ? "🎚 Crossfade on" : "🎚 Crossfade off");
+}
+
+function updateShuffleRepeatUI() {
+  [el("np-shuffle"), el("fs-shuffle")].forEach(btn => btn.classList.toggle("active", shuffleOn));
+  [el("np-repeat"), el("fs-repeat")].forEach(btn => {
+    btn.classList.toggle("active", repeatMode !== "off");
+    btn.classList.toggle("repeat-one", repeatMode === "one");
+  });
+  [el("np-radio"), el("fs-radio")].forEach(btn => btn.classList.toggle("active", radioOn));
+  [el("np-crossfade"), el("fs-crossfade")].forEach(btn => btn.classList.toggle("active", crossfadeOn));
+}
+
+function openNowPlayingFull() { el("now-playing-full").classList.remove("hidden"); }
+function closeNowPlayingFull() { el("now-playing-full").classList.add("hidden"); }
+
+el("np-play").onclick = togglePlay;
+el("np-next").onclick = () => advance(false);
+el("np-prev").onclick = prevTrack;
+el("np-shuffle").onclick = () => setShuffle(!shuffleOn);
+el("np-repeat").onclick = cycleRepeat;
+el("np-radio").onclick = toggleRadio;
+el("np-crossfade").onclick = toggleCrossfade;
+el("np-seek").oninput = (e) => {
+  if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
+};
+function setVolume(v) {
+  userVolume = Math.min(1, Math.max(0, v));
+  store.volume = userVolume;
+  audio.volume = userVolume;
+  el("np-volume").value = userVolume * 100;
+}
+el("np-volume").value = userVolume * 100;
+el("np-volume").oninput = (e) => setVolume(e.target.value / 100);
+
+// Tapping anywhere on the mini-player opens the full-screen view, except the
+// actual controls (buttons/sliders) — a much larger, more forgiving target
+// than just the album art, especially on a phone.
+el("now-playing").addEventListener("click", (e) => {
+  if (e.target.closest("button, input")) return;
+  openNowPlayingFull();
+});
+
+el("fs-play").onclick = togglePlay;
+el("fs-next").onclick = () => advance(false);
+el("fs-prev").onclick = prevTrack;
+el("fs-shuffle").onclick = () => setShuffle(!shuffleOn);
+el("fs-repeat").onclick = cycleRepeat;
+el("fs-radio").onclick = toggleRadio;
+el("fs-crossfade").onclick = toggleCrossfade;
+el("fs-seek").oninput = (e) => {
+  if (audio.duration) audio.currentTime = (e.target.value / 100) * audio.duration;
+};
+el("fs-collapse").onclick = closeNowPlayingFull;
+el("fs-lyrics-toggle").onclick = () => showFsView(fsViewMode === "lyrics" ? "now-playing" : "lyrics");
+el("fs-queue-toggle").onclick = () => showFsView(fsViewMode === "queue" ? "now-playing" : "queue");
+
+updateShuffleRepeatUI();
+
+// ---------- Media Session (lock-screen / hardware media key controls) ----------
+
+function updateMediaSessionMetadata(track, artUrl) {
+  if (!("mediaSession" in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: track.title,
+    artist: track.grandparentTitle || track.originalTitle || "",
+    album: track.parentTitle || "",
+    artwork: [{ src: artUrl, sizes: "600x600", type: "image/jpeg" }],
+  });
+}
+
+if ("mediaSession" in navigator) {
+  navigator.mediaSession.setActionHandler("play", () => audio.play());
+  navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+  navigator.mediaSession.setActionHandler("previoustrack", prevTrack);
+  navigator.mediaSession.setActionHandler("nexttrack", () => advance(false));
+  navigator.mediaSession.setActionHandler("seekto", (details) => {
+    if (details.seekTime != null) audio.currentTime = details.seekTime;
+  });
+}
+
+// ---------- Navigation wiring ----------
+
+document.querySelectorAll(".nav-btn").forEach(btn => {
+  btn.onclick = () => {
+    const view = btn.dataset.view;
+    if (view === "home") showHome();
+    if (view === "artists") showArtists();
+    if (view === "albums") showAlbums();
+    if (view === "playlists") showPlaylists();
+    if (view === "library") showLibrary();
+    closeSidebar();
+  };
+});
+
+function openSidebar() {
+  el("sidebar").classList.add("open");
+  el("sidebar-backdrop").classList.remove("hidden");
+}
+function closeSidebar() {
+  el("sidebar").classList.remove("open");
+  el("sidebar-backdrop").classList.add("hidden");
+}
+el("menu-toggle").onclick = openSidebar;
+el("sidebar-backdrop").onclick = closeSidebar;
+
+function showToast(message, duration = 2500) {
+  const toast = el("toast");
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => toast.classList.add("hidden"), duration);
+}
+
+// Tap the logo 7 times quickly — works on both the sidebar and mobile-bar
+// version, since the mobile-bar one is what most people actually see day to day.
+let logoTapCount = 0;
+let logoTapResetTimer = null;
+function handleLogoTap() {
+  logoTapCount++;
+  clearTimeout(logoTapResetTimer);
+  logoTapResetTimer = setTimeout(() => { logoTapCount = 0; }, 2500);
+  if (logoTapCount >= 7) {
+    logoTapCount = 0;
+    document.body.classList.add("disco");
+    showToast("🕺 disco mode activated", 4000);
+    setTimeout(() => document.body.classList.remove("disco"), 4000);
+  }
+}
+el("sidebar-logo").addEventListener("click", handleLogoTap);
+document.querySelector("#mobile-bar h1").addEventListener("click", handleLogoTap);
+
+el("search-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.value.trim()) {
+    showSearchResults(e.target.value.trim());
+  }
+});
+
+// ---------- Keyboard shortcuts (desktop) ----------
+// Space play/pause, arrows seek ±5s (shift+arrow skips track), up/down for
+// volume — ignored while typing into the search box or any other field.
+document.addEventListener("keydown", (e) => {
+  const target = document.activeElement;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  switch (e.key) {
+    case " ":
+      e.preventDefault();
+      togglePlay();
+      break;
+    case "ArrowRight":
+      e.preventDefault();
+      if (e.shiftKey) advance(false);
+      else if (audio.duration) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+      break;
+    case "ArrowLeft":
+      e.preventDefault();
+      if (e.shiftKey) prevTrack();
+      else audio.currentTime = Math.max(0, audio.currentTime - 5);
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      setVolume(userVolume + 0.05);
+      break;
+    case "ArrowDown":
+      e.preventDefault();
+      setVolume(userVolume - 0.05);
+      break;
+  }
+});
+
+el("logout-btn").onclick = () => {
+  store.token = null;
+  store.server = null;
+  store.musicSectionKey = null;
+  store.playbackState = null;
+  location.reload();
+};
+
+// iOS Safari rarely fires beforeunload when a PWA tab is backgrounded/killed
+// — visibilitychange is what actually catches that case in practice.
+window.addEventListener("beforeunload", savePlaybackState);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) savePlaybackState();
+});
+
+// ---------- Boot ----------
+
+async function boot(isRetry = false) {
+  let token = store.token;
+  if (!token) return showLogin();
+
+  try {
+    let server;
+    if (PLEX_BASE_URL) {
+      // The proxy does its own server discovery — just point at it.
+      server = { name: "Plex (via proxy)", uri: PLEX_BASE_URL, relay: false };
+    } else {
+      server = store.server;
+      // server.relay is only present on connections picked up after the relay-
+      // avoidance fix — re-discover once for anyone with an older cached entry.
+      if (!server || server.relay === undefined) {
+        server = await discoverServer(token, (attempt, total) => {
+          if (attempt > 1) showLogin(`Connecting to your server… (attempt ${attempt}/${total})`);
+        });
+        store.server = server;
+      }
+    }
+    api = new PlexAPI(server.uri, token);
+
+    const sections = await api.getMusicSections();
+    if (!sections.length) throw new Error("No music library found on this server");
+
+    let sectionKey = store.musicSectionKey;
+    if (!sectionKey || !sections.some(s => s.key === sectionKey)) {
+      sectionKey = sections[0].key;
+      store.musicSectionKey = sectionKey;
+    }
+    musicSectionKey = sectionKey;
+
+    const select = el("library-select");
+    select.innerHTML = "";
+    sections.forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s.key;
+      opt.textContent = s.title;
+      if (s.key === sectionKey) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.onchange = () => {
+      musicSectionKey = select.value;
+      store.musicSectionKey = musicSectionKey;
+      showHome();
+    };
+
+    el("server-info").textContent = server.relay ? `${server.name} (via relay)` : server.name;
+    el("login-screen").classList.add("hidden");
+    el("app").classList.remove("hidden");
+    showHome();
+    restorePlaybackState();
+  } catch (err) {
+    console.error(err);
+    const hadCachedServer = !!store.server;
+    store.server = null;
+    // A cached connection can go stale between sessions — dynamic public IP,
+    // relay node rotation, or the listener simply left the home network. Re-run
+    // discovery from scratch once before falling back to the sign-in screen.
+    if (!PLEX_BASE_URL && hadCachedServer && !isRetry) {
+      showLogin("Reconnecting to your server…");
+      return boot(true);
+    }
+    showLogin(err.message, err.details);
+  }
+}
+
+function showLogin(message, details) {
+  el("app").classList.add("hidden");
+  el("login-screen").classList.remove("hidden");
+  if (message) el("login-status").textContent = message;
+  const detailsEl = el("login-details");
+  if (details && details.length) {
+    detailsEl.textContent = details.join("\n");
+    detailsEl.classList.remove("hidden");
+  } else {
+    detailsEl.textContent = "";
+    detailsEl.classList.add("hidden");
+  }
+}
+
+el("login-btn").onclick = async () => {
+  const status = el("login-status");
+  try {
+    await plexLogin(status);
+    status.textContent = "Connecting to your server…";
+    boot();
+  } catch (err) {
+    status.textContent = err.message;
+  }
+};
+
+boot();

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Keyboard Tester - Reece Haigh</title>
+<meta name="description" content="Press keys to see them register on an on-screen keyboard, with their key codes.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .board-scroll { overflow-x: auto; padding-bottom: 8px; }
+  .board { --u: 38px; display: flex; gap: calc(var(--u) * .35); width: max-content; }
+  .row-k { display: flex; }
+  .sect { display: flex; flex-direction: column; }
+  .key { width: calc(var(--u) * var(--w, 1)); height: var(--u); padding: 2px; flex: none; }
+  .key.gap { visibility: hidden; }
+  .key > span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-bottom-width: 3px;
+    border-radius: 7px;
+    font-size: 11px;
+    color: var(--muted);
+    transition: background .08s, border-color .08s, color .08s;
+  }
+  .key.seen > span { background: #12342a; border-color: #1f5c49; color: #b9f3dc; }
+  .key.down > span { background: var(--accent); border-color: var(--accent); color: #06251b; transform: translateY(2px); border-bottom-width: 1px; }
+  .numpad { display: grid; grid-template-columns: repeat(4, calc(var(--u) * 1)); grid-auto-rows: var(--u); }
+  .numpad .key { width: auto; height: auto; }
+
+  .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .readout div { background: #0f1216; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  .readout b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .readout span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; }
+  #notice { display: none; }
+  @media (pointer: coarse) { #notice { display: block; } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Hardware</span>
+      <h1 class="title">Keyboard Tester</h1>
+      <p class="lead">Press any key. It lights up while held and stays marked once it has registered, so you can see which ones you haven't tested yet.</p>
+    </div>
+
+    <p id="notice" class="muted small">This tool needs a physical keyboard.</p>
+
+    <div class="panel">
+      <div class="board-scroll"><div class="board" id="board"></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:12px">
+        <h2 style="margin:0">Last key</h2>
+        <div class="row">
+          <span class="muted small" id="count">0 keys tested</span>
+          <button class="btn" id="reset" type="button">Reset</button>
+        </div>
+      </div>
+      <div class="readout">
+        <div><b>key</b><span id="r-key">-</span></div>
+        <div><b>code</b><span id="r-code">-</span></div>
+        <div><b>keyCode</b><span id="r-kc">-</span></div>
+        <div><b>location</b><span id="r-loc">-</span></div>
+        <div><b>modifiers</b><span id="r-mod">-</span></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    function letters(s) { return s.split('').map(function (c) { return ['Key' + c, c]; }); }
+    function digits() { return '1234567890'.split('').map(function (c) { return ['Digit' + c, c]; }); }
+    function f(a, b) { var o = []; for (var i = a; i <= b; i++) o.push(['F' + i, 'F' + i]); return o; }
+    var G = function (w) { return [null, '', w]; };
+
+    var main = [
+      [['Escape', 'Esc'], G(1), ...f(1, 4), G(.5), ...f(5, 8), G(.5), ...f(9, 12)],
+      [['Backquote', '`'], ...digits(), ['Minus', '-'], ['Equal', '='], ['Backspace', 'Bksp', 2]],
+      [['Tab', 'Tab', 1.5], ...letters('QWERTYUIOP'), ['BracketLeft', '['], ['BracketRight', ']'], ['Backslash', '\\', 1.5]],
+      [['CapsLock', 'Caps', 1.75], ...letters('ASDFGHJKL'), ['Semicolon', ';'], ['Quote', "'"], ['Enter', 'Enter', 2.25]],
+      [['ShiftLeft', 'Shift', 2.25], ...letters('ZXCVBNM'), ['Comma', ','], ['Period', '.'], ['Slash', '/'], ['ShiftRight', 'Shift', 2.75]],
+      [['ControlLeft', 'Ctrl', 1.25], ['MetaLeft', 'Win', 1.25], ['AltLeft', 'Alt', 1.25], ['Space', 'Space', 6.25],
+       ['AltRight', 'Alt', 1.25], ['MetaRight', 'Win', 1.25], ['ContextMenu', 'Menu', 1.25], ['ControlRight', 'Ctrl', 1.25]]
+    ];
+    var nav = [
+      [['PrintScreen', 'PrtSc'], ['ScrollLock', 'ScrLk'], ['Pause', 'Pause']],
+      [['Insert', 'Ins'], ['Home', 'Home'], ['PageUp', 'PgUp']],
+      [['Delete', 'Del'], ['End', 'End'], ['PageDown', 'PgDn']],
+      [G(3)],
+      [G(1), ['ArrowUp', '↑']],
+      [['ArrowLeft', '←'], ['ArrowDown', '↓'], ['ArrowRight', '→']]
+    ];
+    // [code, label, col, row, colSpan, rowSpan]
+    var pad = [
+      ['NumLock', 'Num', 1, 1], ['NumpadDivide', '/', 2, 1], ['NumpadMultiply', '*', 3, 1], ['NumpadSubtract', '-', 4, 1],
+      ['Numpad7', '7', 1, 2], ['Numpad8', '8', 2, 2], ['Numpad9', '9', 3, 2], ['NumpadAdd', '+', 4, 2, 1, 2],
+      ['Numpad4', '4', 1, 3], ['Numpad5', '5', 2, 3], ['Numpad6', '6', 3, 3],
+      ['Numpad1', '1', 1, 4], ['Numpad2', '2', 2, 4], ['Numpad3', '3', 3, 4], ['NumpadEnter', 'Ent', 4, 4, 1, 2],
+      ['Numpad0', '0', 1, 5, 2, 1], ['NumpadDecimal', '.', 3, 5]
+    ];
+
+    var els = {};
+    var seen = {};
+
+    function makeKey(def) {
+      var k = document.createElement('div');
+      k.className = 'key';
+      if (def[2]) k.style.setProperty('--w', def[2]);
+      if (!def[0]) { k.className += ' gap'; return k; }
+      var s = document.createElement('span');
+      s.textContent = def[1];
+      k.appendChild(s);
+      els[def[0]] = k;
+      return k;
+    }
+
+    function section(rows) {
+      var sec = document.createElement('div');
+      sec.className = 'sect';
+      rows.forEach(function (r) {
+        var row = document.createElement('div');
+        row.className = 'row-k';
+        r.forEach(function (d) { row.appendChild(makeKey(d)); });
+        sec.appendChild(row);
+      });
+      return sec;
+    }
+
+    var board = document.getElementById('board');
+    board.appendChild(section(main));
+    board.appendChild(section(nav));
+
+    var np = document.createElement('div');
+    np.className = 'sect';
+    var spacer = document.createElement('div');
+    spacer.style.height = 'var(--u)';
+    np.appendChild(spacer);
+    var grid = document.createElement('div');
+    grid.className = 'numpad';
+    pad.forEach(function (d) {
+      var k = makeKey([d[0], d[1]]);
+      k.style.gridColumn = d[2] + ' / span ' + (d[4] || 1);
+      k.style.gridRow = d[3] + ' / span ' + (d[5] || 1);
+      grid.appendChild(k);
+    });
+    np.appendChild(grid);
+    board.appendChild(np);
+
+    var total = Object.keys(els).length;
+    var $ = function (id) { return document.getElementById(id); };
+
+    function updateCount() {
+      var n = Object.keys(seen).length;
+      $('count').textContent = n + ' of ' + total + ' keys tested';
+    }
+    updateCount();
+
+    window.addEventListener('keydown', function (e) {
+      var mod = /^(Control|Shift|Alt|Meta)/.test(e.code);
+      if (!((e.ctrlKey || e.metaKey) && !mod)) e.preventDefault();
+
+      var el = els[e.code];
+      if (el) { el.classList.add('down', 'seen'); seen[e.code] = 1; updateCount(); }
+
+      $('r-key').textContent = e.key === ' ' ? '(space)' : e.key;
+      $('r-code').textContent = e.code || '-';
+      $('r-kc').textContent = e.keyCode || '-';
+      $('r-loc').textContent = ['standard', 'left', 'right', 'numpad'][e.location] || e.location;
+      var m = [];
+      if (e.ctrlKey) m.push('Ctrl');
+      if (e.altKey) m.push('Alt');
+      if (e.shiftKey) m.push('Shift');
+      if (e.metaKey) m.push('Meta');
+      $('r-mod').textContent = m.length ? m.join('+') : 'none';
+    });
+
+    window.addEventListener('keyup', function (e) {
+      var el = els[e.code];
+      if (el) el.classList.remove('down');
+    });
+
+    function clearDown() { Object.keys(els).forEach(function (c) { els[c].classList.remove('down'); }); }
+    window.addEventListener('blur', clearDown);
+
+    $('reset').addEventListener('click', function () {
+      Object.keys(els).forEach(function (c) { els[c].classList.remove('down', 'seen'); });
+      seen = {};
+      updateCount();
+      ['r-key', 'r-code', 'r-kc', 'r-loc', 'r-mod'].forEach(function (id) { $(id).textContent = '-'; });
+      $('reset').blur();
+    });
+  </script>
+</body>
+</html>

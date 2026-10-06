@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>What My Browser Sees - Reece Haigh</title>
+<meta name="description" content="Screen size, pixel ratio, timezone, language and more, read locally and never sent anywhere.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .info { width: 100%; border-collapse: collapse; }
+  .info th, .info td { text-align: left; padding: 10px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  .info tr:first-child th, .info tr:first-child td { border-top: 0; }
+  .info th { width: 34%; padding-right: 16px; color: var(--muted); font-weight: 500; font-size: 14.5px; }
+  .info td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px; word-break: break-word; }
+  .info td.na { color: var(--muted); }
+  @media (max-width: 560px) {
+    .info th, .info td { display: block; width: 100%; padding: 0; }
+    .info tr { display: block; padding: 10px 0; border-top: 1px solid var(--border); }
+    .info tr:first-child { border-top: 0; }
+    .info th { margin-bottom: 2px; }
+    .info th, .info td { border-top: 0; }
+  }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Dev</span>
+      <h1 class="title">What My Browser Sees</h1>
+      <p class="lead">Everything a web page can learn about your device without asking. It's read in your browser and never sent anywhere.</p>
+    </div>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:8px">
+        <h2 style="margin:0">Display</h2>
+      </div>
+      <table class="info" id="t-display"></table>
+    </div>
+
+    <div class="panel">
+      <h2>Browser &amp; system</h2>
+      <table class="info" id="t-system"></table>
+    </div>
+
+    <div class="panel">
+      <h2>Preferences &amp; capabilities</h2>
+      <table class="info" id="t-prefs"></table>
+    </div>
+
+    <div class="row" style="margin-top:16px">
+      <button class="btn btn-primary" type="button" id="copy">Copy all as text</button>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+    var mq = function (q) { return !!(window.matchMedia && matchMedia(q).matches); };
+
+    function tz() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return null; } }
+    function offset() {
+      var m = -new Date().getTimezoneOffset(), s = m < 0 ? '-' : '+';
+      m = Math.abs(m);
+      return 'UTC' + s + String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    }
+    function pref(a, b, c) { return mq('(' + a + ': ' + b + ')') ? b : (c || null); }
+    function conn() {
+      var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return null;
+      return [c.effectiveType, c.downlink ? c.downlink + ' Mbps' : null, c.saveData ? 'data saver on' : null].filter(Boolean).join(', ') || null;
+    }
+    function yesno(v) { return v ? 'yes' : 'no'; }
+
+    var sections = {
+      't-display': [
+        ['Screen', function () { return screen.width + ' × ' + screen.height + ' px'; }],
+        ['Available screen', function () { return screen.availWidth + ' × ' + screen.availHeight + ' px'; }],
+        ['Viewport', function () { return innerWidth + ' × ' + innerHeight + ' px'; }, true],
+        ['Device pixel ratio', function () { return String(devicePixelRatio); }, true],
+        ['Colour depth', function () { return screen.colorDepth + '-bit'; }],
+        ['Orientation', function () { return (screen.orientation && screen.orientation.type) || (innerWidth > innerHeight ? 'landscape' : 'portrait'); }, true],
+        ['Fullscreen', function () { return yesno(!!(document.fullscreenElement)); }, true],
+        ['HDR / wide colour', function () { return mq('(dynamic-range: high)') ? 'HDR capable' : mq('(color-gamut: p3)') ? 'P3 wide gamut' : mq('(color-gamut: srgb)') ? 'sRGB' : null; }]
+      ],
+      't-system': [
+        ['User agent', function () { return navigator.userAgent; }],
+        ['Platform', function () { return (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || null; }],
+        ['Language', function () { return navigator.language || null; }],
+        ['All languages', function () { return (navigator.languages || []).join(', ') || null; }],
+        ['Timezone', function () { var z = tz(); return z ? z + ' (' + offset() + ')' : offset(); }],
+        ['Local time', function () { return new Date().toString(); }, true],
+        ['CPU threads', function () { return navigator.hardwareConcurrency ? String(navigator.hardwareConcurrency) : null; }],
+        ['Device memory', function () { return navigator.deviceMemory ? '≥ ' + navigator.deviceMemory + ' GB' : null; }],
+        ['Touch points', function () { return String(navigator.maxTouchPoints || 0); }],
+        ['Online', function () { return yesno(navigator.onLine); }, true],
+        ['Connection', conn, true]
+      ],
+      't-prefs': [
+        ['Colour scheme', function () { return pref('prefers-color-scheme', 'dark', 'light'); }, true],
+        ['Reduced motion', function () { return yesno(mq('(prefers-reduced-motion: reduce)')); }, true],
+        ['Contrast preference', function () { return pref('prefers-contrast', 'more', mq('(prefers-contrast: less)') ? 'less' : 'no preference'); }, true],
+        ['Primary pointer', function () { return mq('(pointer: coarse)') ? 'coarse (touch)' : mq('(pointer: fine)') ? 'fine (mouse/trackpad)' : null; }],
+        ['Hover capable', function () { return yesno(mq('(hover: hover)')); }],
+        ['Cookies enabled', function () { return yesno(navigator.cookieEnabled); }],
+        ['Do Not Track', function () { var d = navigator.doNotTrack || window.doNotTrack; return d === '1' ? 'on' : d === '0' ? 'off' : null; }],
+        ['Global Privacy Control', function () { return navigator.globalPrivacyControl === undefined ? null : yesno(navigator.globalPrivacyControl); }],
+        ['Secure context (https)', function () { return yesno(window.isSecureContext); }],
+        ['localStorage', function () { try { localStorage.setItem('_t', '1'); localStorage.removeItem('_t'); return 'available'; } catch (e) { return 'blocked'; } }],
+        ['WebGL', function () { try { var c = document.createElement('canvas'); return (c.getContext('webgl2') ? 'WebGL 2' : c.getContext('webgl') ? 'WebGL 1' : 'unavailable'); } catch (e) { return 'unavailable'; } }],
+        ['Service workers', function () { return yesno('serviceWorker' in navigator); }],
+        ['Clipboard API', function () { return yesno(!!(navigator.clipboard && navigator.clipboard.writeText)); }]
+      ]
+    };
+
+    var cells = [];
+
+    Object.keys(sections).forEach(function (tid) {
+      var table = $(tid);
+      sections[tid].forEach(function (item) {
+        var tr = document.createElement('tr');
+        var th = document.createElement('th'); th.scope = 'row'; th.textContent = item[0];
+        var td = document.createElement('td');
+        tr.appendChild(th); tr.appendChild(td); table.appendChild(tr);
+        cells.push({ label: item[0], fn: item[1], td: td, live: !!item[2] });
+      });
+    });
+
+    function paint(onlyLive) {
+      cells.forEach(function (c) {
+        if (onlyLive && !c.live) return;
+        var v;
+        try { v = c.fn(); } catch (e) { v = null; }
+        if (v === null || v === undefined || v === '') { c.td.textContent = 'not available'; c.td.className = 'na'; }
+        else { c.td.textContent = v; c.td.className = ''; }
+      });
+    }
+    paint(false);
+
+    window.addEventListener('resize', function () { paint(true); });
+    window.addEventListener('online', function () { paint(true); });
+    window.addEventListener('offline', function () { paint(true); });
+    document.addEventListener('fullscreenchange', function () { paint(true); });
+    setInterval(function () { if (!document.hidden) paint(true); }, 1000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) paint(true); });
+
+    $('copy').addEventListener('click', function (e) {
+      var text = cells.map(function (c) { return c.label + ': ' + c.td.textContent; }).join('\n');
+      var btn = e.currentTarget;
+      var done = function () { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+      else { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (x) {} ta.remove(); }
+    });
+  </script>
+</body>
+</html>

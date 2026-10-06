@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Tap Tempo - Reece Haigh</title>
+<meta name="description" content="Tap a beat to find its BPM.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .bpm { text-align: center; padding: 8px 0 20px; }
+  .bpm .num { font-size: clamp(64px, 18vw, 120px); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .bpm .unit { color: var(--muted); letter-spacing: .12em; font-size: 13px; text-transform: uppercase; }
+  #tap {
+    display: block;
+    width: 100%;
+    min-height: 160px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font: 600 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background .08s, border-color .08s, transform .08s;
+  }
+  #tap:hover { border-color: #3a414c; }
+  #tap.hit { background: #12342a; border-color: var(--accent); transform: scale(.995); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 16px; }
+  .stats div { background: #0f1216; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  .stats b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .stats span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Music</span>
+      <h1 class="title">Tap Tempo</h1>
+      <p class="lead">Tap along to a beat and get its tempo. It averages your last few taps and starts fresh after a pause.</p>
+    </div>
+
+    <div class="panel">
+      <div class="bpm">
+        <div class="num" id="bpm" aria-live="polite">-</div>
+        <div class="unit">BPM</div>
+      </div>
+      <button id="tap" type="button">Tap here, or press <kbd>Space</kbd></button>
+      <div class="stats">
+        <div><b>Exact</b><span id="exact">-</span></div>
+        <div><b>Taps</b><span id="taps">0</span></div>
+        <div><b>Interval</b><span id="ms">-</span></div>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn" id="reset" type="button">Reset</button>
+        <span class="muted small">Resets automatically after 2 seconds without a tap.</span>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    var MAX_TAPS = 8, TIMEOUT = 2000;
+    var times = [], total = 0, timer;
+    var $ = function (id) { return document.getElementById(id); };
+
+    function render() {
+      $('taps').textContent = total;
+      if (times.length < 2) { $('bpm').textContent = '-'; $('exact').textContent = '-'; $('ms').textContent = '-'; return; }
+      var avg = (times[times.length - 1] - times[0]) / (times.length - 1);
+      var bpm = 60000 / avg;
+      $('bpm').textContent = Math.round(bpm);
+      $('exact').textContent = bpm.toFixed(1);
+      $('ms').textContent = Math.round(avg) + ' ms';
+    }
+
+    function reset() {
+      times = []; total = 0;
+      clearTimeout(timer);
+      render();
+    }
+
+    function tap() {
+      var now = performance.now();
+      if (times.length && now - times[times.length - 1] > TIMEOUT) { times = []; total = 0; }
+      times.push(now);
+      if (times.length > MAX_TAPS) times.shift();
+      total++;
+      render();
+      clearTimeout(timer);
+      timer = setTimeout(function () { times = []; total = 0; /* keep last reading visible */ $('taps').textContent = 0; }, TIMEOUT);
+
+      var b = $('tap');
+      b.classList.add('hit');
+      setTimeout(function () { b.classList.remove('hit'); }, 90);
+    }
+
+    $('tap').addEventListener('pointerdown', function (e) { e.preventDefault(); tap(); });
+    $('tap').addEventListener('keydown', function (e) { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); });
+    $('reset').addEventListener('click', reset);
+
+    document.addEventListener('keydown', function (e) {
+      if (e.repeat) return;
+      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); tap(); }
+      else if (e.key === 'Escape' || e.key.toLowerCase() === 'r') reset();
+    });
+  </script>
+</body>
+</html>

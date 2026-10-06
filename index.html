@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reece Haigh</title>
+<meta name="description" content="Reece Haigh's personal site: a self-hosted radio player, little browser tools and other web projects.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<link rel="canonical" href="https://reecehaigh.com/">
+<link rel="icon" href="/favicon.ico">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Reece Haigh">
+<meta property="og:title" content="Reece Haigh">
+<meta property="og:description" content="A self-hosted radio player, little browser tools and other web projects.">
+<meta property="og:url" content="https://reecehaigh.com/">
+<meta property="og:image" content="https://reecehaigh.com/assets/images/IMG_8768.jpeg">
+<meta property="og:image:width" content="1920">
+<meta property="og:image:height" content="1080">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --border: #262b33;
+    --text: #f2f3f5;
+    --muted: #9aa2ad;
+    --accent: #6ee7b7;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+
+  a { color: inherit; }
+
+  .wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    min-height: 88vh;
+    display: flex;
+    align-items: flex-end;
+    background: #05070b;
+  }
+
+  /* The hero image is a real <img> (not a CSS background) so the browser can
+     fetch it early and pick a size that suits the screen. */
+  .hero-bg, .hero-bg img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  .hero-bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(6,8,10,.35) 0%, rgba(6,8,10,.75) 100%);
+  }
+
+  .hero-inner {
+    position: relative;
+    width: 100%;
+    padding-bottom: 64px;
+  }
+
+  .eyebrow {
+    display: inline-block;
+    font-size: 13px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  h1.name {
+    margin: 0 0 8px;
+    font-size: clamp(36px, 7vw, 64px);
+    line-height: 1.05;
+    font-weight: 700;
+  }
+
+  .tagline {
+    margin: 0 0 28px;
+    max-width: 46ch;
+    color: #e4e6ea;
+    font-size: clamp(16px, 2.4vw, 19px);
+  }
+
+  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 15px;
+    border: 1px solid transparent;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
+  }
+
+  .btn:hover { transform: translateY(-2px); }
+
+  .btn-primary { background: var(--accent); color: #06251b; }
+  .btn-primary:hover { background: #86f0c4; }
+
+  .btn-ghost { background: rgba(255,255,255,.06); color: var(--text); border-color: rgba(255,255,255,.25); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+  .btn-ghost:hover { border-color: rgba(255,255,255,.5); }
+
+  /* ---- Sections ---- */
+  section { padding: 72px 0; }
+
+  h2.section-title {
+    font-size: 13px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 24px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    display: block;
+    padding: 24px;
+    border-radius: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    text-decoration: none;
+    transition: border-color .15s ease, transform .15s ease;
+  }
+
+  .card:hover { border-color: var(--accent); transform: translateY(-3px); }
+
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 19px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #06251b;
+    background: var(--accent);
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 4px;
+  }
+
+  /* ---- Footer ---- */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 0;
+  }
+
+  .footer-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  .copyright { color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 560px) {
+    .hero { min-height: 78vh; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after { transition: none !important; }
+    .btn:hover, .card:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="hero">
+    <picture class="hero-bg">
+      <source type="image/webp" sizes="100vw"
+        srcset="/assets/images/hero-640.webp 640w, /assets/images/hero-960.webp 960w, /assets/images/hero-1280.webp 1280w, /assets/images/hero-1920.webp 1920w">
+      <img src="/assets/images/IMG_8768.jpeg" alt="" width="1920" height="1080" fetchpriority="high" decoding="async">
+    </picture>
+    <div class="wrap hero-inner">
+      <span class="eyebrow">reecehaigh.com</span>
+      <h1 class="name">Hi, I'm Reece <span id="wave">&#128075;</span></h1>
+      <p class="tagline">I build small web things for fun - a self-hosted radio player, browser toys, and whatever else I'm tinkering with this week.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#projects">See what I've made</a>
+        <a class="btn btn-ghost" href="https://docs.google.com/forms/d/e/1FAIpQLSe7Mr6SjwVwAm-2aYAWII3HgzW2SLXVkrlNwrzbMGSltGF33w/viewform?usp=sf_link" target="_blank" rel="noopener">Get in touch</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <section id="projects">
+      <h2 class="section-title">Projects</h2>
+      <div class="grid">
+        <a class="card" href="/radio/">
+          <h3>Radio <span class="tag">PWA</span></h3>
+          <p>A self-hosted internet radio player - station library, playlists, synced lyrics and Plex scrobbling. Installable on your phone or desktop.</p>
+        </a>
+        <a class="card" href="/tools/">
+          <h3>Tools <span class="tag">9 tools</span></h3>
+          <p>Small, single-purpose web tools - screen and keyboard testers, hash &amp; encode, password generator, JSON formatter, Pomodoro timer and more. All run in your browser.</p>
+        </a>
+        <div class="card">
+          <h3>Homelab <span class="tag">Self-Hosted</span></h3>
+          <p>Everything here - Radio, this site, the rest - runs on infrastructure I built and maintain myself, increasingly with Claude Code as a pair-programmer. (Hi, recruiters.)</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="wrap footer-row">
+      <p class="copyright">&copy; <span id="year"></span> Reece Haigh</p>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    console.log('%c👋 hey', 'font-size:22px;font-weight:700;color:#6ee7b7');
+    console.log('%cLooking at the source? This whole site (git history included) is at github.com/ReeceHaigh/reecehaigh.github.io - built with Claude Code. There\'s also a Konami code on this page (or tap the wave), for what it\'s worth.', 'font-size:13px;color:#9aa2ad');
+
+    // Easter egg: Konami code
+    (function () {
+      var seq = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+      var recent = [];
+      var running = false;
+      window.addEventListener('keydown', function (e) {
+        recent.push(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+        if (recent.length > seq.length) recent.shift();
+        if (recent.join() === seq.join()) { recent = []; launchEasterEgg(); }
+      });
+
+      // Touch devices: tap the wave 5 times
+      var taps = 0, tapTimer;
+      document.getElementById('wave').addEventListener('click', function () {
+        taps++;
+        clearTimeout(tapTimer);
+        tapTimer = setTimeout(function () { taps = 0; }, 800);
+        if (taps >= 5) { taps = 0; launchEasterEgg(); }
+      });
+
+      function launchEasterEgg() {
+        if (running) return;
+        running = true;
+        var toast = document.createElement('div');
+        toast.textContent = 'You found it. 🎉 Now go build something.';
+        toast.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:10000;' +
+          'background:#14171c;border:1px solid #6ee7b7;color:#6ee7b7;padding:10px 18px;border-radius:999px;' +
+          'font:600 14px -apple-system,BlinkMacSystemFont,sans-serif;opacity:0;transition:opacity .4s ease;pointer-events:none';
+        document.body.appendChild(toast);
+        requestAnimationFrame(function () { toast.style.opacity = '1'; });
+        setTimeout(function () {
+          toast.style.opacity = '0';
+          setTimeout(function () { toast.remove(); }, 500);
+        }, 4000);
+
+        // Reduced-motion visitors get the message without the animation.
+        if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          setTimeout(function () { running = false; }, 4500);
+          return;
+        }
+
+        var canvas = document.createElement('canvas');
+        canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:9999;pointer-events:none';
+        document.body.appendChild(canvas);
+        var ctx = canvas.getContext('2d');
+        var w = window.innerWidth, h = window.innerHeight;
+        var dpr = Math.min(window.devicePixelRatio || 1, 2);   // sharp text on retina screens
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        ctx.scale(dpr, dpr);
+        var fontSize = 16;
+        var cols = Math.floor(w / fontSize);
+        var drops = new Array(cols).fill(0);
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ01</>{}';
+        var frame = 0;
+        var maxFrames = 260;
+        var id = setInterval(function () {
+          ctx.fillStyle = 'rgba(11,13,16,0.15)';
+          ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = '#6ee7b7';
+          ctx.font = fontSize + 'px monospace';
+          drops.forEach(function (y, i) {
+            var char = chars[Math.floor(Math.random() * chars.length)];
+            ctx.fillText(char, i * fontSize, y * fontSize);
+            drops[i] = (y * fontSize > h && Math.random() > 0.975) ? 0 : y + 1;
+          });
+          frame++;
+          if (frame > maxFrames) {
+            clearInterval(id);
+            canvas.remove();
+            running = false;
+          }
+        }, 40);
+      }
+    })();
+  </script>
+</body>
+</html>

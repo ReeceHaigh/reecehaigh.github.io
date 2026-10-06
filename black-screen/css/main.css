@@ -1,0 +1,122 @@
+/*! HTML5 Boilerplate v4.3.0 | MIT License | http://h5bp.com/ */
+
+/*
+ * What follows is the result of much research on cross-browser styling.
+ * Credit left inline and big thanks to Nicolas Gallagher, Jonathan Neal,
+ * Kroc Camen, and the H5BP dev community and team.
+ */
+
+/* ==========================================================================
+   Base styles: opinionated defaults
+   ========================================================================== */
+
+html,
+button,
+input,
+select,
+textarea {
+    color: #222;
+}
+
+html {
+    padding: 0;
+    margin: 0;
+}
+
+body{
+    padding: 0;
+    margin: 0;
+    background-color: black;
+    color: silver;
+    text-align: center;
+    font-family: sans-serif;
+}
+
+a{
+    color: silver;
+}
+
+/*
+ * Remove text-shadow in selection highlight: h5bp.com/i
+ * These selection rule sets have to be separate.
+ * Customize the background color to match your design.
+ */
+
+::-moz-selection {
+    background: #b3d4fc;
+    text-shadow: none;
+}
+
+::selection {
+    background: #b3d4fc;
+    text-shadow: none;
+}
+
+/**
+ * Go Fullscren Button
+ */
+
+#buttonFullscreenEnter {
+    background-color:#44c767;
+    -moz-border-radius:28px;
+    -webkit-border-radius:28px;
+    border-radius:28px;
+    border:1px solid #18ab29;
+    display:inline-block;
+    cursor:pointer;
+    color:#ffffff;
+    font-family:arial;
+    font-size:17px;
+    padding:16px 31px;
+    margin: 30px;
+    text-decoration:none;
+    text-shadow:0px 1px 0px #2f6627;
+}
+
+#buttonFullscreenEnter:hover {
+    background-color:#5cbf2a;
+}
+#buttonFullscreenEnter:active {
+    position:relative;
+    top:1px;
+}
+
+#buttonFullscreenExit{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    color: silver;
+    opacity: 0.75;
+    display: none;
+    padding: 10px 20px;
+    border: 1px solid silver;
+    border-radius: 8px;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: normal;
+    line-height: 20px;
+}
+
+
+#fullscreenContent{
+    background-color: black;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    padding: 0;
+    display: none;
+}
+
+p{
+    margin: 25px;
+}
+
+@media only screen and (max-width: 40em) {
+    /* Styles */
+
+    h1{
+        font-size: 1em;
+    }
+}

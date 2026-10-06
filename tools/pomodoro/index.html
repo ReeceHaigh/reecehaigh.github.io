@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Pomodoro Timer - Reece Haigh</title>
+<meta name="description" content="Focus and break timer with a chime and the countdown in the tab title.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .timer { display: grid; place-items: center; padding: 8px 0 16px; }
+  .ring { position: relative; width: min(320px, 80vw); aspect-ratio: 1; }
+  .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring .track { fill: none; stroke: var(--border); stroke-width: 8; }
+  .ring .bar { fill: none; stroke: var(--accent); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset .25s linear, stroke .3s; }
+  body[data-mode="short"] .ring .bar, body[data-mode="long"] .ring .bar { stroke: #7dd3fc; }
+  .ring .label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #time { font-size: clamp(48px, 14vw, 72px); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  #phase { color: var(--muted); letter-spacing: .1em; text-transform: uppercase; font-size: 13px; margin-top: 8px; }
+  .modes { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .controls { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
+  .controls .btn { min-width: 110px; }
+  .dots { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+  .dot.on { background: var(--accent); }
+  .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .settings label { font-size: 13px; color: var(--muted); display: block; }
+  .settings input { margin-top: 4px; }
+</style>
+</head>
+<body data-mode="focus">
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Focus</span>
+      <h1 class="title">Pomodoro Timer</h1>
+      <p class="lead">Work in focused blocks with short breaks between them. The countdown also shows in the tab title, so you can keep an eye on it from another tab.</p>
+    </div>
+
+    <div class="panel">
+      <div class="modes" id="modes" role="group" aria-label="Mode">
+        <button class="btn" type="button" data-mode="focus">Focus</button>
+        <button class="btn" type="button" data-mode="short">Short break</button>
+        <button class="btn" type="button" data-mode="long">Long break</button>
+      </div>
+
+      <div class="timer">
+        <div class="ring">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="track" cx="100" cy="100" r="90"></circle>
+            <circle class="bar" id="bar" cx="100" cy="100" r="90"></circle>
+          </svg>
+          <div class="label">
+            <div id="time" role="timer" aria-live="off">25:00</div>
+            <div id="phase">Focus</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn btn-primary" type="button" id="toggle">Start</button>
+        <button class="btn" type="button" id="reset">Reset</button>
+        <button class="btn" type="button" id="skip">Skip</button>
+      </div>
+      <div class="dots" id="dots" aria-label="Focus sessions completed this cycle"></div>
+      <p class="muted small" style="text-align:center;margin:12px 0 0">Shortcuts: <kbd>Space</kbd> start/pause &middot; <kbd>R</kbd> reset &middot; <kbd>S</kbd> skip</p>
+    </div>
+
+    <div class="panel">
+      <h2>Settings</h2>
+      <div class="settings">
+        <div><label for="m-focus">Focus (min)</label><input type="number" id="m-focus" min="1" max="180" value="25"></div>
+        <div><label for="m-short">Short break (min)</label><input type="number" id="m-short" min="1" max="60" value="5"></div>
+        <div><label for="m-long">Long break (min)</label><input type="number" id="m-long" min="1" max="120" value="15"></div>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <label class="check"><input type="checkbox" id="auto"> Start the next session automatically</label>
+        <label class="check"><input type="checkbox" id="sound" checked> Chime when a session ends</label>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    var NAMES = { focus: 'Focus', short: 'Short break', long: 'Long break' };
+    var CIRC = 2 * Math.PI * 90;
+    var BASE_TITLE = document.title;
+    $('bar').style.strokeDasharray = CIRC;
+
+    var mode = 'focus', remaining, total, running = false, endAt = 0, done = 0, audio;
+
+    // Settings persist per browser, if storage is available.
+    var store = {
+      get: function (k) { try { return localStorage.getItem('pomo.' + k); } catch (e) { return null; } },
+      set: function (k, v) { try { localStorage.setItem('pomo.' + k, v); } catch (e) {} }
+    };
+    ['focus', 'short', 'long'].forEach(function (m) { var v = store.get(m); if (v) $('m-' + m).value = v; });
+    if (store.get('auto') === '1') $('auto').checked = true;
+    if (store.get('sound') === '0') $('sound').checked = false;
+
+    function minutes(m) {
+      var v = parseInt($('m-' + m).value, 10);
+      var max = +$('m-' + m).max;
+      if (!(v >= 1)) v = 1;
+      return Math.min(v, max);
+    }
+
+    function fmt(ms) {
+      var s = Math.max(0, Math.ceil(ms / 1000));
+      return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    }
+
+    function render() {
+      $('time').textContent = fmt(remaining);
+      $('phase').textContent = NAMES[mode];
+      $('bar').style.strokeDashoffset = CIRC * (1 - remaining / total);
+      $('toggle').textContent = running ? 'Pause' : (remaining < total ? 'Resume' : 'Start');
+      document.body.setAttribute('data-mode', mode);
+      Array.prototype.forEach.call($('modes').children, function (b) { b.classList.toggle('active', b.getAttribute('data-mode') === mode); });
+      document.title = (running || remaining < total) ? fmt(remaining) + ' · ' + NAMES[mode] : BASE_TITLE;
+      var dots = $('dots');
+      if (!dots.children.length) for (var i = 0; i < 4; i++) { var d = document.createElement('span'); d.className = 'dot'; dots.appendChild(d); }
+      Array.prototype.forEach.call(dots.children, function (d, i) { d.classList.toggle('on', i < done % 4 || (done > 0 && done % 4 === 0 && mode === 'long')); });
+    }
+
+    function setMode(m) {
+      mode = m;
+      running = false;
+      total = remaining = minutes(m) * 60000;
+      render();
+    }
+
+    function start() {
+      if (running) return;
+      initAudio();
+      endAt = Date.now() + remaining;
+      running = true;
+      render();
+    }
+    function pause() {
+      if (!running) return;
+      remaining = Math.max(0, endAt - Date.now());
+      running = false;
+      render();
+    }
+
+    function initAudio() {
+      if (audio || !(window.AudioContext || window.webkitAudioContext)) return;
+      try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+      if (audio && audio.state === 'suspended') audio.resume();
+    }
+    function chime() {
+      if (!$('sound').checked || !audio) return;
+      var t = audio.currentTime;
+      [880, 1175, 1568].forEach(function (f, i) {
+        var o = audio.createOscillator(), g = audio.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t + i * 0.18);
+        g.gain.exponentialRampToValueAtTime(0.25, t + i * 0.18 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.18 + 0.6);
+        o.connect(g); g.connect(audio.destination);
+        o.start(t + i * 0.18); o.stop(t + i * 0.18 + 0.65);
+      });
+    }
+
+    // Only a finished focus session counts towards the long break; skipping doesn't.
+    function next(counts) {
+      if (mode === 'focus') {
+        if (counts) done++;
+        return counts && done % 4 === 0 ? 'long' : 'short';
+      }
+      return 'focus';
+    }
+
+    function complete() {
+      chime();
+      setMode(next(true));
+      if ($('auto').checked) start();
+    }
+
+    setInterval(function () {
+      if (!running) return;
+      remaining = endAt - Date.now();
+      if (remaining <= 0) complete(); else render();
+    }, 250);
+
+    $('toggle').addEventListener('click', function () { running ? pause() : start(); });
+    $('reset').addEventListener('click', function () { setMode(mode); });
+    $('skip').addEventListener('click', function () { setMode(next(false)); });
+    $('modes').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-mode]');
+      if (b) setMode(b.getAttribute('data-mode'));
+    });
+
+    ['focus', 'short', 'long'].forEach(function (m) {
+      $('m-' + m).addEventListener('change', function () {
+        store.set(m, minutes(m));
+        $('m-' + m).value = minutes(m);
+        if (m === mode && !running && remaining === total) setMode(mode);
+      });
+    });
+    $('auto').addEventListener('change', function () { store.set('auto', this.checked ? '1' : '0'); });
+    $('sound').addEventListener('change', function () { store.set('sound', this.checked ? '1' : '0'); });
+
+    document.addEventListener('keydown', function (e) {
+      var tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || e.ctrlKey || e.metaKey || e.altKey) return;
+      var k = e.key.toLowerCase();
+      if (k === ' ') { if (tag === 'button') return; e.preventDefault(); running ? pause() : start(); }
+      else if (k === 'r') setMode(mode);
+      else if (k === 's') setMode(next(false));
+    });
+
+    setMode('focus');
+  </script>
+</body>
+</html>

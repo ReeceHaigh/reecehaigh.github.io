@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Password Generator - Reece Haigh</title>
+<meta name="description" content="Strong random passwords from your browser's crypto API, with an entropy estimate.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  #pw { font-size: clamp(18px, 4vw, 24px); padding: 18px 16px; min-height: 64px; display: flex; align-items: center; }
+  .meter { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; margin-top: 16px; }
+  .meter > i { display: block; height: 100%; width: 0; background: var(--danger); transition: width .2s, background .2s; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 16px; }
+  .len { display: flex; align-items: center; gap: 16px; }
+  .len output { min-width: 2.5ch; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 20px; text-align: right; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Security</span>
+      <h1 class="title">Password Generator</h1>
+      <p class="lead">Random passwords generated in your browser with the Web Crypto API. Nothing is sent or stored.</p>
+    </div>
+
+    <div class="panel">
+      <div class="out" id="pw" aria-live="polite"></div>
+      <div class="meter" aria-hidden="true"><i id="bar"></i></div>
+      <div class="row spread" style="margin-top:8px">
+        <span class="small" id="strength">&nbsp;</span>
+        <span class="muted small" id="bits"></span>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn btn-primary" type="button" id="copy">Copy</button>
+        <button class="btn" type="button" id="regen">Generate new</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Options</h2>
+      <div class="len">
+        <label for="len" class="muted small">Length</label>
+        <input type="range" id="len" min="8" max="64" value="20">
+        <output id="lenout" for="len">20</output>
+      </div>
+      <div class="opts">
+        <label class="check"><input type="checkbox" id="lower" checked> Lowercase (a&ndash;z)</label>
+        <label class="check"><input type="checkbox" id="upper" checked> Uppercase (A&ndash;Z)</label>
+        <label class="check"><input type="checkbox" id="digits" checked> Digits (0&ndash;9)</label>
+        <label class="check"><input type="checkbox" id="symbols" checked> Symbols (!@#&hellip;)</label>
+        <label class="check"><input type="checkbox" id="ambig"> Avoid look-alikes (<code>l 1 I O 0 o</code>)</label>
+      </div>
+    </div>
+
+    <p id="nocrypto" class="err small" style="display:none">Your browser doesn't support the Web Crypto API, so passwords can't be generated safely here.</p>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    var SETS = {
+      lower: 'abcdefghijklmnopqrstuvwxyz',
+      upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      digits: '0123456789',
+      symbols: '!@#$%^&*()-_=+[]{}:;,.?'
+    };
+    var AMBIG = /[lI1O0o]/g;
+    var hasCrypto = !!(window.crypto && crypto.getRandomValues);
+    if (!hasCrypto) $('nocrypto').style.display = 'block';
+
+    // Unbiased random integer in [0, n) via rejection sampling.
+    function rand(n) {
+      var limit = Math.floor(0x100000000 / n) * n, a = new Uint32Array(1);
+      do { crypto.getRandomValues(a); } while (a[0] >= limit);
+      return a[0] % n;
+    }
+
+    function pools() {
+      var out = [];
+      Object.keys(SETS).forEach(function (k) {
+        if (!$(k).checked) return;
+        var s = $('ambig').checked ? SETS[k].replace(AMBIG, '') : SETS[k];
+        if (s) out.push(s);
+      });
+      return out;
+    }
+
+    function generate() {
+      if (!hasCrypto) return;
+      var ps = pools();
+      if (!ps.length) { $('lower').checked = true; ps = pools(); }
+      var len = +$('len').value, all = ps.join(''), chars = [], i;
+      // one from each chosen set, so every option is actually represented
+      ps.forEach(function (p) { chars.push(p[rand(p.length)]); });
+      while (chars.length < len) chars.push(all[rand(all.length)]);
+      for (i = chars.length - 1; i > 0; i--) { var j = rand(i + 1), t = chars[i]; chars[i] = chars[j]; chars[j] = t; }
+      $('pw').textContent = chars.join('');
+
+      var bits = len * Math.log2(all.length);
+      var level = bits < 45 ? ['Weak', 20, 'var(--danger)'] : bits < 65 ? ['Fair', 45, '#fbbf24'] : bits < 90 ? ['Good', 70, '#a3e635'] : ['Strong', 100, 'var(--accent)'];
+      $('strength').textContent = level[0];
+      $('strength').style.color = level[2];
+      $('bar').style.width = level[1] + '%';
+      $('bar').style.background = level[2];
+      $('bits').textContent = '≈ ' + Math.round(bits) + ' bits of entropy';
+    }
+
+    $('len').addEventListener('input', function () { $('lenout').textContent = this.value; generate(); });
+    ['lower', 'upper', 'digits', 'symbols', 'ambig'].forEach(function (id) { $(id).addEventListener('change', generate); });
+    $('regen').addEventListener('click', generate);
+
+    $('copy').addEventListener('click', function (e) {
+      var btn = e.currentTarget, text = $('pw').textContent;
+      var done = function () { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+      else { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (x) {} ta.remove(); }
+    });
+
+    generate();
+  </script>
+</body>
+</html>
