@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Audio Tester - Reece Haigh</title>
+<meta name="description" content="Check your speakers or headphones left and right, generate test tones and sweeps, and test your microphone level.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .ch { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .chan { width: 76px; height: 76px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel-2); display: grid; place-items: center; font-weight: 700; font-size: 22px; color: var(--muted); transition: background .08s, border-color .08s, color .08s; }
+  .chan.on { background: var(--accent); border-color: var(--accent); color: #06251b; }
+  .vol { display: flex; align-items: center; gap: 12px; }
+  .vol input { flex: 1; }
+  .warn { border: 1px solid rgba(251, 191, 36, .45); background: rgba(251, 191, 36, .08); color: #fde68a; border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+  .freq { display: grid; grid-template-columns: 1fr 130px; gap: 12px; align-items: center; }
+  .freq input[type=number] { text-align: right; }
+  .readout { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 28px; font-variant-numeric: tabular-nums; }
+  .meter { height: 18px; border-radius: 999px; background: var(--border); overflow: hidden; position: relative; }
+  .meter i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, var(--accent), #a3e635 70%, #fbbf24 85%, var(--danger)); }
+  .meter u { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; left: 0; opacity: .85; }
+  select { width: 100%; }
+  #micmsg { min-height: 22px; font-size: 14px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Hardware</span>
+      <h1 class="title">Audio Tester</h1>
+      <p class="lead">Check that left and right are the right way round, play test tones and sweeps, and see your microphone level live. Everything is generated and analysed in your browser.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Volume</h2>
+      <div class="vol"><input type="range" id="vol" min="0" max="100" value="30" aria-label="Test volume"><span class="readout" id="volout" style="font-size:18px;min-width:3.5ch;text-align:right">30%</span></div>
+      <div class="warn" style="margin-top:12px">Start low. Test tones and noise can be much louder and harsher than music, especially in headphones.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Left / right speaker test</h2>
+      <div class="ch" style="margin-bottom:14px"><div class="chan" id="chL">L</div><div class="chan" id="chR">R</div></div>
+      <div class="row">
+        <button class="btn" type="button" data-ch="L">Left</button>
+        <button class="btn" type="button" data-ch="R">Right</button>
+        <button class="btn" type="button" data-ch="B">Both</button>
+        <button class="btn btn-primary" type="button" id="seq">Play L, R, both</button>
+        <select id="sig" style="width:auto" aria-label="Signal"><option value="tone">440 Hz tone</option><option value="noise">Pink noise</option></select>
+      </div>
+      <p class="muted small" style="margin:12px 0 0">Each click plays about 1.5 seconds on the chosen side only. If you hear the left test on the right, the channels are swapped. If one side is silent, check cables, balance settings and the output device.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Tone generator</h2>
+      <div class="freq">
+        <input type="range" id="fslider" min="0" max="1000" value="500" aria-label="Frequency (logarithmic)">
+        <div style="display:flex;align-items:center;gap:6px"><input type="number" id="fnum" min="20" max="20000" value="632" aria-label="Frequency in hertz"><span class="muted">Hz</span></div>
+      </div>
+      <div class="chips" style="margin-top:12px" id="presets">
+        <button class="btn sm" type="button" data-f="40">40</button><button class="btn sm" type="button" data-f="100">100</button><button class="btn sm" type="button" data-f="440">440</button><button class="btn sm" type="button" data-f="1000">1k</button><button class="btn sm" type="button" data-f="4000">4k</button><button class="btn sm" type="button" data-f="10000">10k</button><button class="btn sm" type="button" data-f="15000">15k</button><button class="btn sm" type="button" data-f="18000">18k</button>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <select id="wave" style="width:auto" aria-label="Waveform"><option value="sine">Sine</option><option value="square">Square</option><option value="sawtooth">Sawtooth</option><option value="triangle">Triangle</option></select>
+        <select id="tchan" style="width:auto" aria-label="Output channel"><option value="B">Both channels</option><option value="L">Left only</option><option value="R">Right only</option></select>
+        <button class="btn btn-primary" type="button" id="tplay">Play</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Frequency sweep (20 Hz to 20 kHz)</h2>
+      <div class="row spread"><div class="readout" id="sweepf">-</div><button class="btn btn-primary" type="button" id="sweep">Start sweep</button></div>
+      <p class="muted small" style="margin:12px 0 0">A smooth 15 second glide from very low to very high. Listen for gaps, distortion, rattles or the point where the sound disappears, which shows the range your speakers (and ears) can reproduce.</p>
+    </div>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:12px"><h2 style="margin:0">Microphone level</h2><button class="btn btn-primary" type="button" id="mic">Start microphone</button></div>
+      <div class="meter" aria-hidden="true"><i id="mbar"></i><u id="mpeak"></u></div>
+      <div class="stats" style="margin-top:12px">
+        <div><b>Level</b><span id="mdb">-</span></div>
+        <div><b>Peak</b><span id="mpk">-</span></div>
+        <div><b>Input</b><span id="mdev" style="font-size:13px">-</span></div>
+      </div>
+      <div id="micmsg" class="muted" role="status" style="margin-top:10px">Speak or clap. Audio is analysed locally and is never recorded or sent anywhere.</div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    var ctx = null;
+    function getCtx() {
+      if (!ctx) { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ctx = new AC(); }
+      if (ctx.state === 'suspended') ctx.resume();
+      return ctx;
+    }
+    function masterGain() { var v = $('vol').value / 100; return 0.5 * v * v; }   // squared curve = finer control at the quiet end
+    $('vol').addEventListener('input', function () {
+      $('volout').textContent = this.value + '%';
+      var g = masterGain();
+      if (voices.tone && voices.tone.g) voices.tone.g.gain.setTargetAtTime(g, ctx.currentTime, 0.02);
+      if (voices.sweep && voices.sweep.g) voices.sweep.g.gain.setTargetAtTime(g, ctx.currentTime, 0.02);
+      if (voices.test && voices.test.g) voices.test.g.gain.setTargetAtTime(g, ctx.currentTime, 0.02);
+    });
+
+    var voices = { test: null, tone: null, sweep: null };
+    var pinkBuf = null;
+
+    function pinkNoise(c) {
+      if (pinkBuf && pinkBuf.sampleRate === c.sampleRate) return pinkBuf;
+      var len = c.sampleRate * 3, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+      var b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (var i = 0; i < len; i++) {
+        var w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+        b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+        d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+      }
+      pinkBuf = buf; return buf;
+    }
+
+    // Route a node to the left output, the right output, or both (hard-panned via a channel merger).
+    function route(c, node, ch) {
+      var m = c.createChannelMerger(2);
+      if (ch === 'L' || ch === 'B') node.connect(m, 0, 0);
+      if (ch === 'R' || ch === 'B') node.connect(m, 0, 1);
+      m.connect(c.destination);
+      return m;
+    }
+
+    function stopVoice(name, fade) {
+      var v = voices[name]; if (!v) return;
+      voices[name] = null;
+      try {
+        var t = ctx.currentTime, f = fade === undefined ? 0.03 : fade;
+        v.g.gain.cancelScheduledValues(t); v.g.gain.setValueAtTime(v.g.gain.value, t); v.g.gain.linearRampToValueAtTime(0, t + f);
+        v.src.stop(t + f + 0.02);
+      } catch (e) {}
+      if (v.onstop) v.onstop();
+    }
+
+    function startVoice(name, makeSrc, ch, onstop) {
+      var c = getCtx(); if (!c) { alert('Your browser does not support the Web Audio API.'); return null; }
+      stopVoice(name, 0.01);
+      var src = makeSrc(c), g = c.createGain();
+      g.gain.setValueAtTime(0, c.currentTime);
+      g.gain.linearRampToValueAtTime(masterGain(), c.currentTime + 0.03);
+      src.connect(g); route(c, g, ch);
+      src.start();
+      voices[name] = { src: src, g: g, onstop: onstop };
+      return voices[name];
+    }
+
+    // ---- left / right test ----
+    var chTimer;
+    function lights(ch) { $('chL').classList.toggle('on', ch === 'L' || ch === 'B'); $('chR').classList.toggle('on', ch === 'R' || ch === 'B'); }
+    function playChannel(ch, ms) {
+      var noise = $('sig').value === 'noise';
+      var v = startVoice('test', function (c) {
+        if (noise) { var s = c.createBufferSource(); s.buffer = pinkNoise(c); s.loop = true; return s; }
+        var o = c.createOscillator(); o.type = 'sine'; o.frequency.value = 440; return o;
+      }, ch, function () { lights(null); });
+      if (!v) return;
+      lights(ch); clearTimeout(chTimer);
+      chTimer = setTimeout(function () { stopVoice('test'); }, ms || 1500);
+    }
+    var seqTimers = [];
+    function clearSeq() { seqTimers.forEach(clearTimeout); seqTimers = []; }
+    document.querySelectorAll('[data-ch]').forEach(function (b) { b.addEventListener('click', function () { clearSeq(); playChannel(b.getAttribute('data-ch')); }); });
+    $('seq').addEventListener('click', function () {
+      clearSeq(); playChannel('L', 1200);
+      seqTimers.push(setTimeout(function () { playChannel('R', 1200); }, 1700));
+      seqTimers.push(setTimeout(function () { playChannel('B', 1200); }, 3400));
+    });
+
+    // ---- tone generator ----
+    function sliderToHz(x) { return 20 * Math.pow(1000, x / 1000); }
+    function hzToSlider(f) { return 1000 * Math.log(f / 20) / Math.log(1000); }
+    function curHz() { var f = parseFloat($('fnum').value); return isFinite(f) ? Math.max(20, Math.min(20000, f)) : 440; }
+    function setHz(f, fromSlider) {
+      f = Math.max(20, Math.min(20000, f));
+      $('fnum').value = f < 1000 ? Math.round(f * 10) / 10 : Math.round(f);
+      if (!fromSlider) $('fslider').value = hzToSlider(f);
+      if (voices.tone) voices.tone.src.frequency.setTargetAtTime(f, ctx.currentTime, 0.01);
+    }
+    $('fslider').addEventListener('input', function () { setHz(sliderToHz(+this.value), true); });
+    $('fnum').addEventListener('input', function () { var f = parseFloat(this.value); if (isFinite(f) && f >= 20) setHz(f); });
+    $('fnum').addEventListener('change', function () { setHz(curHz()); });
+    $('presets').addEventListener('click', function (e) { var b = e.target.closest('button[data-f]'); if (b) setHz(+b.getAttribute('data-f')); });
+    $('wave').addEventListener('change', function () { if (voices.tone) voices.tone.src.type = this.value; });
+    $('tchan').addEventListener('change', function () { if (voices.tone) toneToggle(true); });
+    function toneToggle(restart) {
+      if (voices.tone && !restart) { stopVoice('tone'); return; }
+      var v = startVoice('tone', function (c) { var o = c.createOscillator(); o.type = $('wave').value; o.frequency.value = curHz(); return o; }, $('tchan').value, function () { $('tplay').textContent = 'Play'; });
+      if (v) $('tplay').textContent = 'Stop';
+    }
+    $('tplay').addEventListener('click', function () { toneToggle(false); });
+
+    // ---- sweep ----
+    var SWEEP_S = 15, sweepRaf = 0, sweepStart = 0;
+    function sweepFrame() {
+      if (!voices.sweep) return;
+      var t = ctx.currentTime - sweepStart;
+      if (t >= SWEEP_S) { stopVoice('sweep', 0.05); return; }
+      $('sweepf').textContent = Math.round(20 * Math.pow(1000, t / SWEEP_S)) + ' Hz';
+      sweepRaf = requestAnimationFrame(sweepFrame);
+    }
+    $('sweep').addEventListener('click', function () {
+      if (voices.sweep) { stopVoice('sweep'); return; }
+      var v = startVoice('sweep', function (c) {
+        var o = c.createOscillator(); o.type = 'sine';
+        sweepStart = c.currentTime;
+        o.frequency.setValueAtTime(20, c.currentTime); o.frequency.exponentialRampToValueAtTime(20000, c.currentTime + SWEEP_S);
+        return o;
+      }, 'B', function () { $('sweep').textContent = 'Start sweep'; $('sweepf').textContent = '-'; cancelAnimationFrame(sweepRaf); });
+      if (!v) return;
+      $('sweep').textContent = 'Stop sweep'; sweepFrame();
+    });
+
+    // ---- microphone ----
+    var mic = null;
+    function dbText(db) { return isFinite(db) && db > -90 ? db.toFixed(1) + ' dB' : 'silence'; }
+    function stopMic() {
+      if (!mic) return;
+      cancelAnimationFrame(mic.raf);
+      mic.stream.getTracks().forEach(function (t) { t.stop(); });
+      try { mic.src.disconnect(); } catch (e) {}
+      mic = null;
+      $('mic').textContent = 'Start microphone'; $('mbar').style.width = '0'; $('mpeak').style.left = '0'; $('mdb').textContent = '-'; $('mpk').textContent = '-'; $('mdev').textContent = '-';
+    }
+    function micFrame() {
+      if (!mic) return;
+      mic.raf = requestAnimationFrame(micFrame);
+      mic.an.getFloatTimeDomainData(mic.buf);
+      var sum = 0, pk = 0;
+      for (var i = 0; i < mic.buf.length; i++) { var s = mic.buf[i]; sum += s * s; if (Math.abs(s) > pk) pk = Math.abs(s); }
+      var rms = Math.sqrt(sum / mic.buf.length), db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+      var pdb = pk > 0 ? 20 * Math.log10(pk) : -Infinity, now = performance.now();
+      if (pdb >= mic.hold || now - mic.holdT > 1500) { mic.hold = pdb; mic.holdT = now; }
+      var pct = function (d) { return isFinite(d) ? Math.max(0, Math.min(100, (d + 80) / 80 * 100)) : 0; };
+      $('mbar').style.width = pct(db) + '%'; $('mpeak').style.left = 'calc(' + pct(mic.hold) + '% - 2px)';
+      $('mdb').textContent = dbText(db); $('mpk').textContent = dbText(mic.hold);
+      var m = $('micmsg');
+      if (mic.hold > -1) { m.className = 'err'; m.textContent = 'Clipping: the input is too loud. Lower the microphone gain or move back.'; }
+      else if (mic.hold < -60 && now - mic.t0 > 2500) { m.className = 'muted'; m.textContent = 'Very quiet. Check the microphone is not muted and that the right input is selected.'; }
+      else { m.className = 'muted'; m.textContent = 'Listening. Audio is analysed locally and never recorded or sent.'; }
+    }
+    $('mic').addEventListener('click', function () {
+      if (mic) { stopMic(); return; }
+      var m = $('micmsg');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { m.className = 'err'; m.textContent = 'Microphone access is not available here (it needs a secure https page and a supported browser).'; return; }
+      var c = getCtx(); if (!c) return;
+      m.className = 'muted'; m.textContent = 'Waiting for permission...';
+      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }).then(function (stream) {
+        var src = c.createMediaStreamSource(stream), an = c.createAnalyser(); an.fftSize = 2048;
+        src.connect(an);   // analysed only, never connected to the speakers (no feedback)
+        mic = { stream: stream, src: src, an: an, buf: new Float32Array(an.fftSize), hold: -Infinity, holdT: 0, t0: performance.now(), raf: 0 };
+        var tr = stream.getAudioTracks()[0]; $('mdev').textContent = (tr && tr.label) ? tr.label.slice(0, 40) : 'default';
+        tr && tr.addEventListener('ended', stopMic);
+        $('mic').textContent = 'Stop microphone'; micFrame();
+      }, function (e) {
+        m.className = 'err';
+        m.textContent = e && e.name === 'NotAllowedError' ? 'Permission was denied. Allow microphone access in your browser to use this test.'
+          : e && e.name === 'NotFoundError' ? 'No microphone was found.' : 'Could not start the microphone' + (e && e.message ? ': ' + e.message : '.');
+      });
+    });
+
+    window.addEventListener('pagehide', function () { ['test', 'tone', 'sweep'].forEach(function (n) { stopVoice(n, 0); }); stopMic(); });
+    setHz(632);
+  </script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>JWT Decoder - Reece Haigh</title>
+<meta name="description" content="Decode a JSON Web Token in your browser: header, payload, expiry and claims. Nothing is sent anywhere.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  pre.json { margin: 0; white-space: pre-wrap; word-break: break-all; }
+  .parts { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; line-height: 1.7; }
+  .parts .p1 { color: #f87171; } .parts .p2 { color: #c4b5fd; } .parts .p3 { color: #7dd3fc; } .parts .dot { color: var(--muted); }
+  .badge { display: inline-block; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+  .badge.good { color: var(--accent); border-color: rgba(110, 231, 183, .5); }
+  .badge.bad { color: var(--danger); border-color: rgba(248, 113, 113, .5); }
+  .badge.warn { color: #fbbf24; border-color: rgba(251, 191, 36, .5); }
+  .warnbox { border: 1px solid rgba(251, 191, 36, .45); background: rgba(251, 191, 36, .08); color: #fde68a; border-radius: 10px; padding: 10px 14px; font-size: 14px; margin-top: 12px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .cols .panel + .panel { margin-top: 0; }
+  #err { min-height: 22px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Dev</span>
+      <h1 class="title">JWT Decoder</h1>
+      <p class="lead">Paste a JSON Web Token to read its header, payload and expiry. It is decoded entirely in your browser and never sent anywhere.</p>
+    </div>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:12px">
+        <h2 style="margin:0">Token</h2>
+        <div class="row"><button class="btn sm" type="button" id="sample">Load an example</button><button class="btn sm" type="button" id="clear">Clear</button></div>
+      </div>
+      <textarea id="tok" class="mono" spellcheck="false" autocomplete="off" aria-label="JSON Web Token" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." style="min-height:120px"></textarea>
+      <div id="err" class="err small" role="alert" style="margin-top:8px"></div>
+      <div class="parts" id="parts" style="margin-top:4px"></div>
+    </div>
+
+    <div id="out" hidden>
+      <div id="warns"></div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Claims</h2>
+        <dl class="kv" id="claims"></dl>
+      </div>
+
+      <div class="cols" style="margin-top:16px">
+        <div class="panel"><h2>Header</h2><pre class="out json" id="hdr"></pre></div>
+        <div class="panel"><h2>Payload</h2><pre class="out json" id="pay"></pre></div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Signature</h2>
+        <div class="out mono" id="sig"></div>
+        <p class="muted small" style="margin:10px 0 0">This tool decodes the token but <strong>does not verify the signature</strong>. Decoding is not proof the token is genuine. Only your server, with the right key, can check that.</p>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+    var dec = new TextDecoder('utf-8', { fatal: true });
+
+    function b64urlBytes(s) {
+      s = s.replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      var bin = atob(s), out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    function decodeJson(part, name) {
+      if (!/^[A-Za-z0-9_-]*$/.test(part)) throw new Error('The ' + name + ' contains characters that are not valid in a JWT (it should be Base64URL: letters, digits, "-" and "_").');
+      var text;
+      try { text = dec.decode(b64urlBytes(part)); } catch (e) { throw new Error('The ' + name + ' could not be decoded as Base64URL text.'); }
+      var obj;
+      try { obj = JSON.parse(text); } catch (e) { throw new Error('The ' + name + ' decoded, but it is not valid JSON.'); }
+      if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('The ' + name + ' should be a JSON object.');
+      return obj;
+    }
+
+    function parseJwt(raw) {
+      var t = raw.trim().replace(/^authorization:\s*/i, '').replace(/^bearer\s+/i, '').replace(/^["']|["']$/g, '').replace(/\s+/g, '');
+      if (!t) throw new Error('');
+      var parts = t.split('.');
+      if (parts.length < 2 || parts.length > 3) throw new Error('A JWT has three parts separated by dots (header.payload.signature). This has ' + parts.length + '.');
+      return { raw: t, parts: parts, header: decodeJson(parts[0], 'header'), payload: decodeJson(parts[1], 'payload'), sig: parts[2] || '' };
+    }
+
+    var rtf = (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat) ? new Intl.RelativeTimeFormat('en', { numeric: 'auto' }) : null;
+    function relative(sec) {   // sec = seconds from now (negative = past)
+      var units = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
+      for (var i = 0; i < units.length; i++) {
+        if (Math.abs(sec) >= units[i][1] || units[i][0] === 'second') {
+          var v = Math.round(sec / units[i][1]);
+          if (rtf) return rtf.format(v, units[i][0]);
+          return v < 0 ? Math.abs(v) + ' ' + units[i][0] + 's ago' : 'in ' + v + ' ' + units[i][0] + 's';
+        }
+      }
+    }
+
+    var cur = null;
+
+    function pretty(o) { return JSON.stringify(o, null, 2); }
+
+    function addRow(dl, k, valueNode) {
+      var dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = k;
+      if (typeof valueNode === 'string') { var s = document.createElement('span'); s.textContent = valueNode; dd.appendChild(s); } else dd.appendChild(valueNode);
+      dl.appendChild(dt); dl.appendChild(dd);
+    }
+    function badge(text, cls) { var b = document.createElement('span'); b.className = 'badge ' + cls; b.textContent = text; return b; }
+
+    function timeRow(dl, label, claim, v, now) {
+      var box = document.createElement('span');
+      if (typeof v !== 'number' || !isFinite(v)) { box.textContent = JSON.stringify(v) + ' (expected a number of seconds since 1970)'; addRow(dl, label, box); return; }
+      var d = new Date(v * 1000);
+      var txt = isNaN(d.getTime()) ? String(v) : d.toISOString().replace('T', ' ').replace('.000Z', ' UTC') + '  (' + d.toLocaleString() + ' local)';
+      var wrap = document.createElement('span'); wrap.textContent = txt + ' ';
+      var diff = v - now, st;
+      if (claim === 'exp') st = diff <= 0 ? badge('Expired ' + relative(diff), 'bad') : badge('Expires ' + relative(diff), 'good');
+      else if (claim === 'nbf') st = diff > 0 ? badge('Not valid ' + relative(diff), 'warn') : badge('Active since ' + relative(diff), 'good');
+      else st = badge('Issued ' + relative(diff), 'good');
+      wrap.appendChild(st); addRow(dl, label, wrap);
+    }
+
+    function renderClaims() {
+      if (!cur) return;
+      var p = cur.payload, dl = $('claims'), now = Math.floor(Date.now() / 1000);
+      dl.textContent = '';
+      var named = [['iss', 'Issuer (iss)'], ['sub', 'Subject (sub)'], ['aud', 'Audience (aud)'], ['jti', 'Token ID (jti)']];
+      named.forEach(function (n) { if (p[n[0]] !== undefined) addRow(dl, n[1], typeof p[n[0]] === 'string' ? p[n[0]] : JSON.stringify(p[n[0]])); });
+      [['iat', 'Issued at (iat)'], ['nbf', 'Not before (nbf)'], ['exp', 'Expires (exp)']].forEach(function (n) { if (p[n[0]] !== undefined) timeRow(dl, n[1], n[0], p[n[0]], now); });
+      var alg = cur.header.alg; if (alg !== undefined) addRow(dl, 'Algorithm (alg)', String(alg));
+      if (!dl.children.length) addRow(dl, 'Standard claims', 'None found in the payload');
+    }
+
+    function render() {
+      var raw = $('tok').value, err = $('err');
+      var r;
+      try { r = parseJwt(raw); } catch (e) { cur = null; err.textContent = e.message; $('out').hidden = true; $('parts').textContent = ''; return; }
+      err.textContent = ''; cur = r;
+      var pe = $('parts'); pe.textContent = '';
+      r.parts.forEach(function (s, i) {
+        var sp = document.createElement('span'); sp.className = 'p' + (i + 1); sp.textContent = s; pe.appendChild(sp);
+        if (i < r.parts.length - 1) { var d = document.createElement('span'); d.className = 'dot'; d.textContent = '.'; pe.appendChild(d); }
+      });
+      $('hdr').textContent = pretty(r.header); $('pay').textContent = pretty(r.payload);
+      var bytes = 0; try { bytes = b64urlBytes(r.sig).length; } catch (e) {}
+      $('sig').textContent = r.sig ? r.sig + '\n(' + bytes + ' bytes)' : '(empty)';
+
+      var w = $('warns'); w.textContent = '';
+      function warn(msg) { var d = document.createElement('div'); d.className = 'warnbox'; d.textContent = msg; w.appendChild(d); }
+      var alg = String(r.header.alg || '').toLowerCase();
+      if (alg === 'none') warn('This token is unsigned (alg: none). Servers should reject it. Anyone could have written this.');
+      else if (!r.sig) warn('This token has no signature part.');
+      if (r.payload.exp === undefined) warn('No expiry (exp) claim: this token never expires on its own.');
+      renderClaims();
+      $('out').hidden = false;
+    }
+
+    function b64u(s) { return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+
+    $('sample').addEventListener('click', function () {
+      var now = Math.floor(Date.now() / 1000);
+      var h = b64u(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+      var p = b64u(JSON.stringify({ iss: 'https://auth.example.com', sub: 'user_1234567890', aud: 'my-api', name: 'Example User', roles: ['admin', 'editor'], iat: now - 600, nbf: now - 600, exp: now + 3600 }));
+      $('tok').value = h + '.' + p + '.ZXhhbXBsZS1zaWduYXR1cmUtbm90LXJlYWw';
+      render();
+    });
+    $('clear').addEventListener('click', function () { $('tok').value = ''; render(); $('tok').focus(); });
+    $('tok').addEventListener('input', render);
+    setInterval(function () { if (!document.hidden) renderClaims(); }, 15000);
+    render();
+  </script>
+</body>
+</html>

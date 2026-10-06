@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Timestamp Converter - Reece Haigh</title>
+<meta name="description" content="Convert Unix timestamps to dates and back, across any time zone.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .now { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .now > div { background: #0f1216; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .now b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .now span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  .grid2 .panel + .panel { margin-top: 0; }
+  label.f { display: block; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  .field + .field { margin-top: 12px; }
+  #err1, #err2 { min-height: 20px; }
+  select { width: 100%; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Dev</span>
+      <h1 class="title">Timestamp Converter</h1>
+      <p class="lead">Turn Unix timestamps into readable dates and back again, in any time zone. Seconds, milliseconds, microseconds and nanoseconds are detected automatically.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Right now</h2>
+      <div class="now">
+        <div><div><b>Unix seconds</b><span id="n-s"></span></div><button class="btn sm" type="button" data-copy="n-s">Copy</button></div>
+        <div><div><b>Unix milliseconds</b><span id="n-ms"></span></div><button class="btn sm" type="button" data-copy="n-ms">Copy</button></div>
+        <div><div><b>ISO 8601 (UTC)</b><span id="n-iso" style="font-size:14px"></span></div><button class="btn sm" type="button" data-copy="n-iso">Copy</button></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Show times in</h2>
+      <select id="zone" aria-label="Time zone"></select>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>Timestamp or date to readable</h2>
+        <div class="field">
+          <label class="f" for="in1">Unix timestamp, ISO date, or any date text</label>
+          <input type="text" id="in1" class="mono" spellcheck="false" autocomplete="off" placeholder="1700000000 or 2024-03-15T09:30:00Z">
+        </div>
+        <div class="field">
+          <label class="f" for="unit">Unit</label>
+          <select id="unit"><option value="auto">Auto-detect</option><option value="s">Seconds</option><option value="ms">Milliseconds</option><option value="us">Microseconds</option><option value="ns">Nanoseconds</option></select>
+        </div>
+        <div id="err1" class="err small" role="alert" style="margin-top:8px"></div>
+        <dl class="kv" id="res1" style="margin-top:8px"></dl>
+      </div>
+
+      <div class="panel">
+        <h2>Date and time to timestamp</h2>
+        <div class="field">
+          <label class="f" for="in2">Date and time (read as a time in the zone chosen above)</label>
+          <input type="datetime-local" id="in2" step="1" aria-label="Date and time">
+        </div>
+        <div class="row" style="margin-top:12px"><button class="btn sm" type="button" id="usenow">Use current time</button></div>
+        <div id="err2" class="err small" role="alert" style="margin-top:8px"></div>
+        <dl class="kv" id="res2" style="margin-top:8px"></dl>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+    var LOCAL = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+    // --- zones ---
+    (function () {
+      var sel = $('zone'), zones = [];
+      try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) {}
+      if (!zones.length) zones = ['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'Pacific/Auckland'];
+      function add(v, label) { var o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o); }
+      add(LOCAL, 'Your local time (' + LOCAL + ')');
+      add('UTC', 'UTC');
+      zones.forEach(function (z) { if (z !== LOCAL && z !== 'UTC') add(z, z.replace(/_/g, ' ')); });
+    })();
+
+    // Offset (ms) of a zone from UTC at a given instant.
+    function offsetAt(zone, ms) {
+      var f = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+      var o = {}; f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = +p.value; });
+      var asUtc = Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute, o.second);
+      return asUtc - Math.floor(ms / 1000) * 1000;
+    }
+    // Wall-clock components in a zone -> instant (ms). DST gaps/overlaps resolve to the earlier valid instant.
+    function zonedToUtc(zone, y, mo, d, h, mi, s) {
+      var guess = Date.UTC(y, mo - 1, d, h, mi, s);
+      var off1 = offsetAt(zone, guess), t = guess - off1, off2 = offsetAt(zone, t);
+      if (off1 !== off2) { t = guess - off2; if (offsetAt(zone, t) !== off2) t = guess - Math.min(off1, off2); }
+      return t;
+    }
+
+    function two(n) { return String(n).padStart(2, '0'); }
+    function isoWeek(ms) {
+      var d = new Date(ms); d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      var day = d.getUTCDay() || 7; d.setUTCDate(d.getUTCDate() + 4 - day);
+      var y0 = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return d.getUTCFullYear() + '-W' + two(Math.ceil(((d - y0) / 86400000 + 1) / 7));
+    }
+    var rtf = Intl.RelativeTimeFormat ? new Intl.RelativeTimeFormat('en', { numeric: 'auto' }) : null;
+    function relative(ms) {
+      var sec = Math.round((ms - Date.now()) / 1000), u = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]];
+      for (var i = 0; i < u.length; i++) if (Math.abs(sec) >= u[i][1] || i === 5) { var v = Math.round(sec / u[i][1]); return rtf ? rtf.format(v, u[i][0]) : (v < 0 ? -v + ' ' + u[i][0] + 's ago' : 'in ' + v + ' ' + u[i][0] + 's'); }
+    }
+
+    function copyBtn(text) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn sm copy'; b.textContent = 'Copy';
+      b.addEventListener('click', function () {
+        var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1100); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+      });
+      return b;
+    }
+    function row(dl, k, v, copy) {
+      var dt = document.createElement('dt'), dd = document.createElement('dd'), s = document.createElement('span');
+      dt.textContent = k; s.textContent = v; dd.appendChild(s);
+      if (copy !== false) dd.appendChild(copyBtn(v));
+      dl.appendChild(dt); dl.appendChild(dd);
+    }
+
+    function fmtZone(ms, zone) {
+      return new Intl.DateTimeFormat('en-GB', { timeZone: zone, dateStyle: 'full', timeStyle: 'long' }).format(new Date(ms));
+    }
+    function isoInZone(ms, zone) {
+      var off = offsetAt(zone, ms), sign = off < 0 ? '-' : '+', a = Math.abs(off) / 60000;
+      var local = new Date(ms + off).toISOString().slice(0, 19);
+      return local + (zone === 'UTC' ? 'Z' : sign + two(Math.floor(a / 60)) + ':' + two(a % 60));
+    }
+
+    function describe(dl, ms) {
+      var zone = $('zone').value;
+      dl.textContent = '';
+      var d = new Date(ms);
+      row(dl, 'Unix seconds', String(Math.floor(ms / 1000)));
+      row(dl, 'Unix milliseconds', String(ms));
+      row(dl, 'ISO 8601 (UTC)', d.toISOString());
+      row(dl, 'In ' + (zone === LOCAL ? 'your zone' : zone.replace(/_/g, ' ')), fmtZone(ms, zone), false);
+      row(dl, 'ISO 8601 (' + (zone === 'UTC' ? 'UTC' : 'zone offset') + ')', isoInZone(ms, zone));
+      row(dl, 'UTC string', d.toUTCString());
+      row(dl, 'Relative', relative(ms), false);
+      row(dl, 'ISO week', isoWeek(ms), false);
+    }
+
+    function parseInput(text, unit) {
+      var t = text.trim();
+      if (!t) return null;
+      if (/^-?\d+(\.\d+)?$/.test(t)) {
+        var n = Number(t), a = Math.abs(n), u = unit;
+        if (u === 'auto') u = a < 1e11 ? 's' : a < 1e14 ? 'ms' : a < 1e17 ? 'us' : 'ns';
+        var ms = u === 's' ? n * 1000 : u === 'ms' ? n : u === 'us' ? n / 1000 : n / 1e6;
+        ms = Math.round(ms);
+        if (!isFinite(ms) || Math.abs(ms) > 8.64e15) throw new Error('That number is outside the range of dates a browser can represent.');
+        return { ms: ms, unit: u };
+      }
+      var p = Date.parse(t);
+      if (isNaN(p)) throw new Error('Could not read that as a timestamp or date. Try 1700000000 or 2024-03-15T09:30:00Z.');
+      return { ms: p, unit: null };
+    }
+
+    var UNIT_NAME = { s: 'seconds', ms: 'milliseconds', us: 'microseconds', ns: 'nanoseconds' };
+
+    function update1() {
+      var dl = $('res1'), err = $('err1'); err.textContent = ''; dl.textContent = '';
+      var r;
+      try { r = parseInput($('in1').value, $('unit').value); } catch (e) { err.textContent = e.message; return; }
+      if (!r) return;
+      if (r.unit && $('unit').value === 'auto') { err.className = 'muted small'; err.textContent = 'Read as ' + UNIT_NAME[r.unit] + '.'; }
+      else err.className = 'err small';
+      describe(dl, r.ms);
+    }
+
+    function update2() {
+      var dl = $('res2'), err = $('err2'); err.textContent = ''; dl.textContent = '';
+      var v = $('in2').value;
+      if (!v) return;
+      var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v);
+      if (!m) { err.textContent = 'Pick a full date and time.'; return; }
+      var ms = zonedToUtc($('zone').value, +m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] || 0));
+      describe(dl, ms);
+    }
+
+    function setNow() {
+      var n = Date.now();
+      $('n-s').textContent = Math.floor(n / 1000); $('n-ms').textContent = n; $('n-iso').textContent = new Date(n).toISOString();
+    }
+
+    document.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-copy]'); if (!b) return;
+      var text = $(b.getAttribute('data-copy')).textContent;
+      var done = function () { var o = b.textContent; b.textContent = 'Copied'; setTimeout(function () { b.textContent = o; }, 1100); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+    });
+
+    function localInputValue() {
+      var zone = $('zone').value, off = offsetAt(zone, Date.now());
+      return new Date(Date.now() + off).toISOString().slice(0, 19);
+    }
+    $('usenow').addEventListener('click', function () { $('in2').value = localInputValue(); update2(); });
+    $('in1').addEventListener('input', update1);
+    $('unit').addEventListener('change', update1);
+    $('in2').addEventListener('input', update2);
+    $('zone').addEventListener('change', function () { update1(); update2(); });
+
+    setNow(); setInterval(function () { if (!document.hidden) setNow(); }, 1000);
+    $('in1').value = String(Math.floor(Date.now() / 1000));
+    $('in2').value = localInputValue();
+    update1(); update2();
+  </script>
+</body>
+</html>

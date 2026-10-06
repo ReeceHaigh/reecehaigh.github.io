@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Regex Tester - Reece Haigh</title>
+<meta name="description" content="Test JavaScript regular expressions live, with match highlighting, capture groups and replace.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .re { display: flex; align-items: center; gap: 8px; }
+  .re .slash { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; }
+  .re input { flex: 1; }
+  .flags { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .flags .btn { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 4px 12px; font-size: 13px; }
+  .hl { white-space: pre-wrap; word-break: break-word; min-height: 120px; max-height: 420px; overflow: auto; }
+  .hl mark { border-radius: 3px; color: var(--text); padding: 1px 0; }
+  .hl mark.a { background: rgba(110, 231, 183, .28); box-shadow: 0 0 0 1px rgba(110, 231, 183, .55); }
+  .hl mark.b { background: rgba(125, 211, 252, .26); box-shadow: 0 0 0 1px rgba(125, 211, 252, .55); }
+  .hl .zero { display: inline-block; width: 0; border-left: 2px solid var(--accent); height: 1.1em; vertical-align: text-bottom; }
+  #status { min-height: 22px; font-size: 14px; }
+  table.m { width: 100%; border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  table.m th, table.m td { text-align: left; padding: 8px 12px 8px 0; border-top: 1px solid var(--border); vertical-align: top; word-break: break-all; }
+  table.m th { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; border-top: 0; }
+  table.m .g { color: var(--accent); }
+  table.m .u { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Dev</span>
+      <h1 class="title">Regex Tester</h1>
+      <p class="lead">Try JavaScript regular expressions against your own text. Matches highlight as you type, with capture groups and a replace preview.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Pattern</h2>
+      <div class="re">
+        <span class="slash">/</span>
+        <input type="text" id="pat" class="mono" spellcheck="false" autocomplete="off" aria-label="Regular expression pattern" placeholder="(\w+)@(\w+)\.com">
+        <span class="slash">/<span id="flagstr"></span></span>
+      </div>
+      <div class="flags" id="flags" role="group" aria-label="Flags">
+        <button class="btn" type="button" data-f="g" aria-pressed="true" title="global: find every match">g</button>
+        <button class="btn" type="button" data-f="i" aria-pressed="false" title="ignore case">i</button>
+        <button class="btn" type="button" data-f="m" aria-pressed="false" title="multiline: ^ and $ match at line breaks">m</button>
+        <button class="btn" type="button" data-f="s" aria-pressed="false" title="dotAll: . matches line breaks">s</button>
+        <button class="btn" type="button" data-f="u" aria-pressed="false" title="unicode">u</button>
+        <span class="muted small" style="margin-left:8px">Examples:</span>
+        <button class="btn sm" type="button" data-ex="email">Email</button>
+        <button class="btn sm" type="button" data-ex="date">Date</button>
+        <button class="btn sm" type="button" data-ex="hex">Hex colour</button>
+        <button class="btn sm" type="button" data-ex="ip">IPv4</button>
+      </div>
+      <div id="status" role="status" aria-live="polite" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Test string</h2>
+      <textarea id="txt" class="mono" spellcheck="false" aria-label="Test string" placeholder="Paste some text to test against&hellip;"></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Matches</h2>
+      <div class="out hl" id="hl" aria-live="polite"></div>
+      <div class="scroll" style="margin-top:16px"><table class="m" id="mt" hidden></table></div>
+    </div>
+
+    <div class="panel">
+      <h2>Replace</h2>
+      <input type="text" id="rep" class="mono" spellcheck="false" autocomplete="off" aria-label="Replacement" placeholder="Replacement, e.g. $2 at $1 (supports $1, $&amp;, $&lt;name&gt;)">
+      <div class="out" id="repout" style="margin-top:12px" aria-live="polite"></div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    // The matching code lives in one function so it can run in a worker (which can be
+    // killed if a pattern backtracks forever) or inline as a fallback.
+    function work(d) {
+      try {
+        var re = new RegExp(d.pattern, d.flags), res = [], m, truncated = false;
+        function pack(x) { return { index: x.index, text: x[0], groups: Array.prototype.slice.call(x, 1).map(function (g) { return g === undefined ? null : g; }), named: x.groups ? Object.assign({}, x.groups) : null }; }
+        if (!re.global) { m = re.exec(d.text); if (m) res.push(pack(m)); }
+        else {
+          while ((m = re.exec(d.text)) !== null) {
+            res.push(pack(m));
+            if (m[0] === '') {
+              var cp = d.text.codePointAt(re.lastIndex);
+              re.lastIndex += (re.unicode && cp > 0xFFFF) ? 2 : 1;
+            }
+            if (res.length >= 1000) { truncated = true; break; }
+          }
+        }
+        var replaced = d.replace === null ? null : d.text.replace(new RegExp(d.pattern, d.flags), d.replace);
+        return { ok: true, matches: res, replaced: replaced, truncated: truncated };
+      } catch (e) { return { ok: false, error: e.message }; }
+    }
+
+    var worker = null, seq = 0, timer = null, TIMEOUT = 1500;
+    function makeWorker() {
+      try {
+        var url = URL.createObjectURL(new Blob(['var work=' + work.toString() + ';onmessage=function(e){postMessage(work(e.data));};'], { type: 'text/javascript' }));
+        worker = new Worker(url);
+      } catch (e) { worker = null; }
+    }
+    makeWorker();
+
+    function run(d, cb) {
+      var my = ++seq;
+      clearTimeout(timer);
+      if (!worker) { cb(work(d)); return; }
+      worker.onmessage = function (e) { if (my !== seq) return; clearTimeout(timer); cb(e.data); };
+      worker.onerror = function () { if (my !== seq) return; clearTimeout(timer); cb({ ok: false, error: 'The matcher crashed.' }); };
+      worker.postMessage(d);
+      timer = setTimeout(function () {
+        if (my !== seq) return;
+        worker.terminate(); makeWorker();
+        cb({ ok: false, timeout: true });
+      }, TIMEOUT);
+    }
+
+    var flagsOn = { g: true, i: false, m: false, s: false, u: false };
+    function flagStr() { return 'gimsu'.split('').filter(function (f) { return flagsOn[f]; }).join(''); }
+
+    function setStatus(msg, cls) { var s = $('status'); s.textContent = msg; s.className = cls || 'muted'; }
+
+    function showMatches(text, res) {
+      var hl = $('hl'); hl.textContent = '';
+      var pos = 0;
+      res.matches.forEach(function (m, i) {
+        if (m.index < pos) return;
+        if (m.index > pos) hl.appendChild(document.createTextNode(text.slice(pos, m.index)));
+        if (m.text === '') { var z = document.createElement('span'); z.className = 'zero'; hl.appendChild(z); pos = m.index; }
+        else { var k = document.createElement('mark'); k.className = i % 2 ? 'b' : 'a'; k.textContent = m.text; hl.appendChild(k); pos = m.index + m.text.length; }
+      });
+      if (pos < text.length) hl.appendChild(document.createTextNode(text.slice(pos)));
+
+      var t = $('mt'); t.textContent = '';
+      if (!res.matches.length) { t.hidden = true; return; }
+      t.hidden = false;
+      var hasNamed = res.matches.some(function (m) { return m.named; });
+      var maxG = Math.max.apply(null, res.matches.map(function (m) { return m.groups.length; }));
+      var h = t.insertRow(), cols = ['#', 'Index', 'Match'];
+      for (var g = 1; g <= maxG; g++) cols.push('Group ' + g);
+      if (hasNamed) cols.push('Named');
+      cols.forEach(function (c) { var th = document.createElement('th'); th.textContent = c; h.appendChild(th); });
+      res.matches.slice(0, 200).forEach(function (m, i) {
+        var r = t.insertRow();
+        r.insertCell().textContent = i + 1;
+        r.insertCell().textContent = m.index;
+        var mc = r.insertCell(); mc.textContent = m.text === '' ? '(empty)' : m.text; if (m.text === '') mc.className = 'u';
+        for (var g = 0; g < maxG; g++) {
+          var c = r.insertCell(), v = m.groups[g];
+          if (g >= m.groups.length) { c.textContent = ''; }
+          else if (v === null) { c.textContent = 'undefined'; c.className = 'u'; }
+          else { c.textContent = v; c.className = 'g'; }
+        }
+        if (hasNamed) r.insertCell().textContent = m.named ? JSON.stringify(m.named) : '';
+      });
+    }
+
+    var debounce;
+    function update() {
+      clearTimeout(debounce);
+      debounce = setTimeout(go, 120);
+    }
+
+    function go() {
+      var pattern = $('pat').value, text = $('txt').value, flags = flagStr();
+      $('flagstr').textContent = flags;
+      var rep = $('rep').value;
+      if (!pattern) { seq++; $('hl').textContent = text; $('mt').hidden = true; $('repout').textContent = ''; setStatus('Enter a pattern to begin.', 'muted'); return; }
+      try { new RegExp(pattern, flags); } catch (e) { seq++; $('hl').textContent = text; $('mt').hidden = true; $('repout').textContent = ''; setStatus(e.message, 'err'); return; }
+      var t0 = performance.now();
+      run({ pattern: pattern, flags: flags, text: text, replace: rep === '' ? null : rep }, function (res) {
+        if (res.timeout) { $('hl').textContent = text; $('mt').hidden = true; $('repout').textContent = ''; setStatus('Stopped after ' + (TIMEOUT / 1000) + 's: this pattern is taking too long on this text, which usually means catastrophic backtracking (for example nested quantifiers like (a+)+).', 'err'); return; }
+        if (!res.ok) { $('hl').textContent = text; $('mt').hidden = true; setStatus(res.error, 'err'); return; }
+        var n = res.matches.length;
+        setStatus((n === 0 ? 'No matches' : n + (res.truncated ? '+' : '') + ' match' + (n === 1 ? '' : 'es')) + (res.truncated ? ' (showing the first 1000)' : '') + ' in ' + Math.max(1, Math.round(performance.now() - t0)) + ' ms', n ? 'ok' : 'muted');
+        showMatches(text, res);
+        $('repout').textContent = res.replaced === null ? '' : res.replaced;
+      });
+    }
+
+    $('flags').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-f]');
+      if (b) { var f = b.getAttribute('data-f'); flagsOn[f] = !flagsOn[f]; b.setAttribute('aria-pressed', flagsOn[f]); update(); return; }
+      var x = e.target.closest('button[data-ex]'); if (!x) return;
+      var ex = EXAMPLES[x.getAttribute('data-ex')];
+      $('pat').value = ex.p; $('txt').value = ex.t; $('rep').value = ex.r || '';
+      Object.keys(flagsOn).forEach(function (f) { flagsOn[f] = ex.f.indexOf(f) >= 0; document.querySelector('[data-f=' + f + ']').setAttribute('aria-pressed', flagsOn[f]); });
+      go();
+    });
+    ['pat', 'txt', 'rep'].forEach(function (id) { $(id).addEventListener('input', update); });
+
+    var EXAMPLES = {
+      email: { p: '([\\w.+-]+)@([\\w-]+)\\.[\\w.]+', f: 'g', t: 'Contact alice@example.com or bob.smith+news@mail.example.org for details.\nNot an address: @nobody, foo@', r: '$1 at $2' },
+      date: { p: '(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})', f: 'g', t: 'Released 2024-03-15, patched 2024-04-02, retired 2025-01-31.', r: '$<day>/$<month>/$<year>' },
+      hex: { p: '#(?:[0-9a-f]{6}|[0-9a-f]{3})\\b', f: 'gi', t: 'Colours: #6ee7b7, #FFF, #12345, #0b0d10 and #abc.' },
+      ip: { p: '\\b(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\b', f: 'g', t: 'Gateway 192.168.1.1, DNS 8.8.8.8, bogus 999.1.1.1, edge 255.255.255.255.' }
+    };
+
+    go();
+  </script>
+</body>
+</html>

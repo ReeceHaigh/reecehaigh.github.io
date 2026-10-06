@@ -9,6 +9,11 @@
 <meta name="description" content="Small, single-purpose web tools. Everything runs in your browser.">
 <link rel="icon" href="/favicon.ico">
 <link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .filters { margin-bottom: 20px; }
+  .count { color: var(--muted); font-size: 13px; margin: -8px 0 16px; }
+  .card[hidden] { display: none; }
+</style>
 </head>
 <body>
   <header class="topbar">
@@ -25,7 +30,10 @@
       <p class="lead">Small, single-purpose web tools. No accounts, no tracking, no uploads - everything runs in your browser.</p>
     </div>
 
-    <div class="grid">
+    <div class="chips filters" id="filters" role="group" aria-label="Filter tools by category"></div>
+    <div class="count" id="count" aria-live="polite"></div>
+
+    <div class="grid" id="grid">
       <a class="card" href="/black-screen/">
         <h3>Black Screen <span class="tag">Screen</span></h3>
         <p>Fullscreen black for spotting dust and fingerprints while you clean your monitor.</p>
@@ -38,9 +46,37 @@
         <h3>Keyboard Tester <span class="tag">Hardware</span></h3>
         <p>See every key register on an on-screen keyboard, with its key code.</p>
       </a>
-      <a class="card" href="/tools/tap-tempo/">
-        <h3>Tap Tempo <span class="tag">Music</span></h3>
-        <p>Tap a beat, get the BPM. Works with the spacebar or a tap.</p>
+      <a class="card" href="/tools/mouse-test/">
+        <h3>Mouse Tester <span class="tag">Hardware</span></h3>
+        <p>Test every button, the wheel and double-click chatter, plus a click-speed test.</p>
+      </a>
+      <a class="card" href="/tools/gamepad-test/">
+        <h3>Gamepad Tester <span class="tag">Hardware</span></h3>
+        <p>See buttons, triggers and sticks live, check for stick drift and test vibration.</p>
+      </a>
+      <a class="card" href="/tools/audio-test/">
+        <h3>Audio Tester <span class="tag">Hardware</span></h3>
+        <p>Left and right speaker check, tone generator, frequency sweep and a microphone level meter.</p>
+      </a>
+      <a class="card" href="/tools/subnet-calc/">
+        <h3>Subnet Calculator <span class="tag">Network</span></h3>
+        <p>Network, broadcast, host range and masks for any IPv4 CIDR, with subnet splitting.</p>
+      </a>
+      <a class="card" href="/tools/regex-test/">
+        <h3>Regex Tester <span class="tag">Dev</span></h3>
+        <p>Live match highlighting, capture groups and a replace preview for JavaScript regex.</p>
+      </a>
+      <a class="card" href="/tools/jwt-decode/">
+        <h3>JWT Decoder <span class="tag">Dev</span></h3>
+        <p>Read a token's header, payload and expiry locally. Nothing is sent anywhere.</p>
+      </a>
+      <a class="card" href="/tools/timestamp/">
+        <h3>Timestamp Converter <span class="tag">Dev</span></h3>
+        <p>Unix timestamps to readable dates and back, in any time zone.</p>
+      </a>
+      <a class="card" href="/tools/json-format/">
+        <h3>JSON Formatter <span class="tag">Dev</span></h3>
+        <p>Pretty-print, minify and validate JSON, with the error line and column.</p>
       </a>
       <a class="card" href="/tools/hash-encode/">
         <h3>Hash &amp; Encode <span class="tag">Dev</span></h3>
@@ -50,22 +86,58 @@
         <h3>What My Browser Sees <span class="tag">Dev</span></h3>
         <p>Screen size, pixel ratio, timezone, language and more - read locally, never sent anywhere.</p>
       </a>
-      <a class="card" href="/tools/pomodoro/">
-        <h3>Pomodoro Timer <span class="tag">Focus</span></h3>
-        <p>Focus and break timer with a chime, and the countdown in the tab title.</p>
-      </a>
       <a class="card" href="/tools/password-gen/">
         <h3>Password Generator <span class="tag">Security</span></h3>
         <p>Strong random passwords from your browser's crypto API, with an entropy estimate.</p>
       </a>
-      <a class="card" href="/tools/json-format/">
-        <h3>JSON Formatter <span class="tag">Dev</span></h3>
-        <p>Pretty-print, minify and validate JSON, with the error line and column.</p>
+      <a class="card" href="/tools/tap-tempo/">
+        <h3>Tap Tempo <span class="tag">Music</span></h3>
+        <p>Tap a beat, get the BPM. Works with the spacebar or a tap.</p>
+      </a>
+      <a class="card" href="/tools/metronome/">
+        <h3>Metronome <span class="tag">Music</span></h3>
+        <p>A steady click with accents, subdivisions and tap tempo that keeps time in a background tab.</p>
+      </a>
+      <a class="card" href="/tools/pomodoro/">
+        <h3>Pomodoro Timer <span class="tag">Focus</span></h3>
+        <p>Focus and break timer with a chime, and the countdown in the tab title.</p>
+      </a>
+      <a class="card" href="/tools/typing-test/">
+        <h3>Typing Speed Test <span class="tag">Fun</span></h3>
+        <p>A 15, 30 or 60 second test with WPM, accuracy and a saved personal best.</p>
       </a>
     </div>
   </main>
 
   <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
-  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    // Category filters are built from the tags on the cards, so new tools need no extra wiring.
+    (function () {
+      var cards = Array.prototype.slice.call(document.querySelectorAll('#grid .card'));
+      var tags = [];
+      cards.forEach(function (c) { var t = c.querySelector('.tag').textContent.trim(); c.setAttribute('data-tag', t); if (tags.indexOf(t) < 0) tags.push(t); });
+      var box = document.getElementById('filters'), count = document.getElementById('count');
+
+      function apply(tag) {
+        var n = 0;
+        cards.forEach(function (c) { var show = tag === 'All' || c.getAttribute('data-tag') === tag; c.hidden = !show; if (show) n++; });
+        Array.prototype.forEach.call(box.children, function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-tag') === tag); b.classList.toggle('active', b.getAttribute('data-tag') === tag); });
+        count.textContent = (tag === 'All' ? n + ' tools' : n + ' ' + tag + ' tool' + (n === 1 ? '' : 's'));
+        try { sessionStorage.setItem('toolsFilter', tag); } catch (e) {}
+      }
+
+      ['All'].concat(tags).forEach(function (t) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'btn sm'; b.textContent = t; b.setAttribute('data-tag', t);
+        b.addEventListener('click', function () { apply(t); });
+        box.appendChild(b);
+      });
+      var saved = 'All'; try { saved = sessionStorage.getItem('toolsFilter') || 'All'; } catch (e) {}
+      apply(tags.indexOf(saved) >= 0 ? saved : 'All');
+    })();
+  </script>
 </body>
 </html>

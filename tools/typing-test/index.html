@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Typing Speed Test - Reece Haigh</title>
+<meta name="description" content="Test your typing speed and accuracy in 15, 30 or 60 seconds. Words per minute, raw speed and a personal best.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .modes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #words {
+    position: relative;
+    height: calc(1.9em * 3 + 8px);
+    overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: clamp(18px, 3.4vw, 24px);
+    line-height: 1.9;
+    color: #5b6470;
+    cursor: text;
+    user-select: none;
+    -webkit-user-select: none;
+    word-break: keep-all;
+    scroll-behavior: auto;
+  }
+  #words .w { display: inline-block; margin-right: .6em; border-radius: 4px; }
+  #words .w.cur { background: rgba(255, 255, 255, .07); box-shadow: 0 0 0 3px rgba(255, 255, 255, .07); }
+  #words .w.bad { text-decoration: underline wavy var(--danger); text-underline-offset: 6px; }
+  #words .c.ok { color: var(--text); }
+  #words .w.done .c.ok { color: var(--accent); }
+  #words .c.bad { color: var(--danger); }
+  #words .c.extra { color: var(--danger); opacity: .8; }
+  #words .caret { display: inline-block; width: 2px; height: 1.2em; background: var(--accent); vertical-align: middle; margin: 0 -1px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #words .caret { animation: none; } }
+  .field { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  .field input { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; }
+  .live { display: flex; gap: 22px; flex-wrap: wrap; align-items: baseline; margin-bottom: 12px; }
+  .live .t { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); min-width: 2.4ch; }
+  .live .l { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+  .live .v { font-size: 20px; font-variant-numeric: tabular-nums; margin-left: 6px; }
+  .big { font-size: clamp(44px, 12vw, 72px); font-weight: 700; line-height: 1; }
+  .result .sub { color: var(--muted); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+  .best { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Fun</span>
+      <h1 class="title">Typing Speed Test</h1>
+      <p class="lead">Type the words as fast and accurately as you can. The timer starts on your first keystroke. Your results stay in your browser.</p>
+    </div>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:12px">
+        <div class="modes" id="modes" role="group" aria-label="Duration">
+          <button class="btn sm" type="button" data-s="15">15 s</button>
+          <button class="btn sm active" type="button" data-s="30">30 s</button>
+          <button class="btn sm" type="button" data-s="60">60 s</button>
+        </div>
+        <button class="btn sm" type="button" id="restart">Restart <kbd>Esc</kbd></button>
+      </div>
+
+      <div class="live" aria-live="off">
+        <div class="t" id="time">30</div>
+        <div><span class="l">WPM</span><span class="v" id="lwpm">0</span></div>
+        <div><span class="l">Accuracy</span><span class="v" id="lacc">100%</span></div>
+      </div>
+
+      <div id="words" aria-label="Words to type" role="presentation"></div>
+      <div class="field">
+        <input type="text" id="typed" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" aria-label="Type here">
+      </div>
+      <p class="muted small" id="hint" style="margin:10px 0 0">Click the box and start typing. Press <kbd>Space</kbd> after each word. <kbd>Esc</kbd> restarts.</p>
+    </div>
+
+    <div class="panel result" id="result" hidden>
+      <h2>Result</h2>
+      <div class="row" style="gap:40px;align-items:flex-end">
+        <div><div class="sub">Words per minute</div><div class="big" id="r-wpm">0</div><div class="best" id="r-best"></div></div>
+        <div><div class="sub">Accuracy</div><div class="big" id="r-acc" style="font-size:clamp(32px,8vw,48px)">0%</div></div>
+      </div>
+      <div class="stats" style="margin-top:20px">
+        <div><b>Raw speed</b><span id="r-raw">0</span></div>
+        <div><b>Correct words</b><span id="r-ok">0</span></div>
+        <div><b>Wrong words</b><span id="r-bad">0</span></div>
+        <div><b>Characters</b><span id="r-ch">0</span></div>
+      </div>
+      <div class="row" style="margin-top:16px"><button class="btn btn-primary" type="button" id="again">Try again</button><span class="muted small" id="r-note"></span></div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    var WORDS = ('the be of and a to in he have it that for they I with as not on she at by this we you do but from or which one would all will there say who make when can more if no man out other so what time up go about than into could state only new year some take come these know see use get like then first any work now may such give over think most even find day also after way many must look before great back through long where much should well people down own just because good each those feel seem how high too place little world very still nation hand old life tell write become here show house both between need mean call develop under last right move thing general school never same another begin while number part turn real leave might want point form off child few small since against ask late home interest large person end open public follow during present without again hold govern around possible head consider word program problem however lead system set order eye plan run keep face fact group play stand increase early course change help line city put close case force meet once water upon war build hear light unit next quite music type screen paper green stone river small quick brown jump lazy planet signal garden window bridge market engine silver forest simple travel energy memory pocket ladder butter castle nature rhythm shadow thunder velvet wonder yellow').split(/\s+/);
+
+    var DURATIONS = { 15: 1, 30: 1, 60: 1 };
+    var store = {
+      get: function (k) { try { return localStorage.getItem('typing.' + k); } catch (e) { return null; } },
+      set: function (k, v) { try { localStorage.setItem('typing.' + k, v); } catch (e) {} }
+    };
+
+    var secs = +store.get('secs') || 30; if (!DURATIONS[secs]) secs = 30;
+    var words = [], idx = 0, wordEls = [], results = [];       // results[i] = true/false per committed word
+    var started = false, finished = false, t0 = 0, timer = null;
+    var keys = 0, errs = 0, typedChars = 0, correctChars = 0;
+    var box = $('words'), input = $('typed');
+
+    function pick(n) {
+      var out = [], last = '';
+      while (out.length < n) { var w = WORDS[Math.floor(Math.random() * WORDS.length)]; if (w !== last && w) { out.push(w); last = w; } }
+      return out;
+    }
+
+    function buildWords() {
+      box.textContent = ''; wordEls = [];
+      words.forEach(function (w) {
+        var s = document.createElement('span'); s.className = 'w';
+        for (var i = 0; i < w.length; i++) { var c = document.createElement('span'); c.className = 'c'; c.textContent = w[i]; s.appendChild(c); }
+        box.appendChild(s); box.appendChild(document.createTextNode(' ')); wordEls.push(s);
+      });
+    }
+
+    function elapsed() { return started ? (performance.now() - t0) / 1000 : 0; }
+
+    function stats(sec) {
+      var min = Math.max(sec, 1) / 60;
+      var okWords = results.filter(Boolean).length;
+      var net = (correctChars) / 5 / min, raw = typedChars / 5 / min;
+      var acc = keys ? Math.max(0, Math.round((keys - errs) / keys * 1000) / 10) : 100;
+      return { net: Math.round(net), raw: Math.round(raw), acc: acc, ok: okWords, bad: results.length - okWords };
+    }
+
+    function updateLive() {
+      var e = elapsed(), left = Math.max(0, secs - e);
+      $('time').textContent = Math.ceil(left);
+      var s = stats(e);
+      $('lwpm').textContent = e > 1 ? s.net : 0; $('lacc').textContent = s.acc + '%';
+    }
+
+    function paintCurrent() {
+      var w = wordEls[idx]; if (!w) return;
+      var typed = input.value, target = words[idx], chars = w.children;
+      Array.prototype.forEach.call(w.querySelectorAll('.extra, .caret'), function (n) { n.remove(); });
+      for (var i = 0; i < target.length; i++) {
+        var c = chars[i];
+        c.className = 'c' + (i < typed.length ? (typed[i] === target[i] ? ' ok' : ' bad') : '');
+      }
+      for (var j = target.length; j < typed.length; j++) { var x = document.createElement('span'); x.className = 'c extra'; x.textContent = typed[j]; w.appendChild(x); }
+      var caret = document.createElement('span'); caret.className = 'caret';
+      var pos = Math.min(typed.length, target.length + (typed.length > target.length ? typed.length - target.length : 0));
+      if (pos >= w.children.length) w.appendChild(caret); else w.insertBefore(caret, w.children[pos]);
+    }
+
+    function focusWord() {
+      wordEls.forEach(function (e, i) { e.classList.toggle('cur', i === idx); });
+      var w = wordEls[idx]; if (!w) return;
+      // keep the active word on the middle line, scrolling a whole line at a time
+      var lh = parseFloat(getComputedStyle(box).lineHeight) || 40;
+      box.scrollTop = Math.max(0, Math.round(w.offsetTop / lh) - 1) * lh;
+      paintCurrent();
+    }
+
+    function commit(word) {
+      var target = words[idx], ok = word === target, w = wordEls[idx];
+      results.push(ok);
+      typedChars += word.length + 1;
+      if (ok) correctChars += target.length + 1;
+      w.classList.remove('cur'); w.classList.add('done'); if (!ok) w.classList.add('bad');
+      Array.prototype.forEach.call(w.querySelectorAll('.caret'), function (n) { n.remove(); });
+      idx++;
+      if (idx >= words.length) { words = words.concat(pick(60)); /* never run out */ appendWords(); }
+      focusWord();
+    }
+    function appendWords() {
+      for (var k = wordEls.length; k < words.length; k++) {
+        var s = document.createElement('span'); s.className = 'w';
+        for (var i = 0; i < words[k].length; i++) { var c = document.createElement('span'); c.className = 'c'; c.textContent = words[k][i]; s.appendChild(c); }
+        box.appendChild(s); box.appendChild(document.createTextNode(' ')); wordEls.push(s);
+      }
+    }
+
+    function startTimer() {
+      started = true; t0 = performance.now();
+      timer = setInterval(function () { if (elapsed() >= secs) finish(); else updateLive(); }, 100);
+      $('hint').style.visibility = 'hidden';
+    }
+
+    function finish() {
+      if (finished) return;
+      finished = true; clearInterval(timer);
+      // count a final word that was typed exactly but not yet followed by a space
+      var cur = input.value;
+      if (cur && cur === words[idx]) { results.push(true); typedChars += cur.length; correctChars += cur.length; }
+      var s = stats(secs);
+      input.disabled = true; $('time').textContent = '0'; updateLiveFinal(s);
+      $('r-wpm').textContent = s.net; $('r-acc').textContent = s.acc + '%'; $('r-raw').textContent = s.raw;
+      $('r-ok').textContent = s.ok; $('r-bad').textContent = s.bad; $('r-ch').textContent = typedChars;
+      var best = +store.get('best' + secs) || 0, note = $('r-best');
+      if (s.net > best) { store.set('best' + secs, s.net); note.textContent = best ? 'New personal best for ' + secs + ' s! (was ' + best + ')' : 'Your first ' + secs + ' s result is saved as your personal best.'; }
+      else note.textContent = 'Personal best for ' + secs + ' s: ' + best + ' WPM';
+      $('r-note').textContent = s.net >= 70 ? 'Quick fingers.' : s.net >= 40 ? 'Right around the average typist.' : 'Keep practising, accuracy first and speed follows.';
+      $('result').hidden = false;
+      $('result').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    function updateLiveFinal(s) { $('lwpm').textContent = s.net; $('lacc').textContent = s.acc + '%'; }
+
+    function reset() {
+      clearInterval(timer);
+      started = finished = false; idx = 0; results = []; keys = errs = typedChars = correctChars = 0;
+      words = pick(120); buildWords();
+      input.disabled = false; input.value = '';
+      $('time').textContent = secs; $('lwpm').textContent = '0'; $('lacc').textContent = '100%';
+      $('result').hidden = true; $('hint').style.visibility = '';
+      Array.prototype.forEach.call($('modes').children, function (b) { b.classList.toggle('active', +b.getAttribute('data-s') === secs); });
+      box.scrollTop = 0; focusWord();
+    }
+
+    input.addEventListener('beforeinput', function (e) { if (finished) e.preventDefault(); });
+    input.addEventListener('paste', function (e) { e.preventDefault(); });
+    input.addEventListener('drop', function (e) { e.preventDefault(); });
+
+    var prev = '';
+    input.addEventListener('input', function (e) {
+      if (finished) return;
+      var v = input.value;
+      if (!started && v.replace(/\s/g, '')) startTimer();
+      // count keystrokes for accuracy (only characters that were added)
+      if (e.inputType === 'insertText' && e.data) {
+        for (var k = 0; k < e.data.length; k++) {
+          var ch = e.data[k];
+          if (ch === ' ') continue;
+          keys++;
+          var pos = prev.length + k;
+          if (words[idx][pos] !== ch) errs++;
+        }
+      }
+      if (/\s/.test(v)) {
+        var word = v.trim().split(/\s+/)[0];
+        input.value = ''; prev = '';
+        if (word) commit(word); else paintCurrent();
+        return;
+      }
+      prev = v; paintCurrent();
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); reset(); input.focus(); }
+      else if (e.key === 'Tab' && !e.shiftKey && document.activeElement === input) { e.preventDefault(); reset(); input.focus(); }
+    });
+
+    box.addEventListener('click', function () { input.focus(); });
+    $('restart').addEventListener('click', function () { reset(); input.focus(); });
+    $('again').addEventListener('click', function () { reset(); input.focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    $('modes').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-s]'); if (!b) return;
+      secs = +b.getAttribute('data-s'); store.set('secs', secs); reset(); input.focus();
+    });
+
+    reset();
+  </script>
+</body>
+</html>

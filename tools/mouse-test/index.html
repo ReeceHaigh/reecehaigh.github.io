@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Mouse Tester - Reece Haigh</title>
+<meta name="description" content="Test every mouse button, the scroll wheel, double-click chatter and click speed.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  #pad {
+    position: relative;
+    height: 260px;
+    border-radius: 14px;
+    border: 1px dashed #3a414c;
+    background: #0f1216;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    color: var(--muted);
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+  }
+  #pad.active { border-color: var(--accent); }
+  #pad .hint { pointer-events: none; padding: 0 16px; }
+  #dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent); opacity: 0; pointer-events: none; box-shadow: 0 0 0 6px rgba(110, 231, 183, .18); }
+  .btns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 16px; }
+  @media (max-width: 560px) { .btns { grid-template-columns: repeat(3, 1fr); } }
+  .tile { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center; transition: background .08s, border-color .08s; }
+  .tile b { display: block; font-size: 13px; }
+  .tile span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 20px; color: var(--muted); }
+  .tile.down { background: var(--accent); border-color: var(--accent); color: #06251b; }
+  .tile.down span { color: #06251b; }
+  .tile.seen { border-color: #1f5c49; }
+  #cps { display: block; width: 100%; min-height: 120px; font: 600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; border-radius: 14px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  #cps:hover { border-color: #3a414c; }
+  #cps.run { border-color: var(--accent); background: #12342a; }
+  .flag { font-size: 14px; min-height: 22px; }
+  #notice { display: none; }
+  @media (pointer: coarse) { #notice { display: block; } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Hardware</span>
+      <h1 class="title">Mouse Tester</h1>
+      <p class="lead">Check every button, the scroll wheel, and whether a switch is double-clicking by itself. Everything is measured in your browser.</p>
+    </div>
+
+    <p id="notice" class="muted small">This tool is designed for a physical mouse.</p>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:12px"><h2 style="margin:0">Test pad</h2><button class="btn sm" type="button" id="reset">Reset</button></div>
+      <div id="pad" tabindex="0" aria-label="Mouse test area">
+        <div class="hint">Move, click, right-click, middle-click, use the side buttons and scroll here.</div>
+        <div id="dot"></div>
+      </div>
+      <div class="btns" id="btns">
+        <div class="tile" data-b="0"><b>Left</b><span>0</span></div>
+        <div class="tile" data-b="1"><b>Middle</b><span>0</span></div>
+        <div class="tile" data-b="2"><b>Right</b><span>0</span></div>
+        <div class="tile" data-b="3"><b>Back</b><span>0</span></div>
+        <div class="tile" data-b="4"><b>Forward</b><span>0</span></div>
+      </div>
+      <div class="stats" style="margin-top:16px">
+        <div><b>Position</b><span id="s-pos">-</span></div>
+        <div><b>Speed</b><span id="s-speed">-</span></div>
+        <div><b>Wheel up</b><span id="s-up">0</span></div>
+        <div><b>Wheel down</b><span id="s-down">0</span></div>
+        <div><b>Wheel tilt</b><span id="s-tilt">0</span></div>
+        <div><b>Update rate</b><span id="s-hz">-</span></div>
+      </div>
+      <p class="muted small" style="margin:12px 0 0">Update rate is how often your browser reports movement, which can be capped by the browser or screen refresh rate, so treat it as a rough indication rather than your mouse's true polling rate.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Double-click chatter</h2>
+      <p class="muted small" style="margin:0 0 12px">Click the left button once at a time in the pad. If two clicks register less than 80 ms apart, the switch may be wearing out.</p>
+      <div class="stats">
+        <div><b>Last gap</b><span id="d-last">-</span></div>
+        <div><b>Shortest gap</b><span id="d-min">-</span></div>
+        <div><b>Suspect clicks</b><span id="d-bad">0</span></div>
+      </div>
+      <div class="flag" id="d-flag" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel">
+      <div class="row spread" style="margin-bottom:12px">
+        <h2 style="margin:0">Click speed (CPS)</h2>
+        <div class="row"><label class="muted small" for="dur">Duration</label><select id="dur" style="width:auto"><option value="5" selected>5 s</option><option value="10">10 s</option><option value="30">30 s</option></select></div>
+      </div>
+      <button id="cps" type="button">Click here to start</button>
+      <div class="stats" style="margin-top:12px">
+        <div><b>Clicks</b><span id="c-n">0</span></div>
+        <div><b>Time left</b><span id="c-t">-</span></div>
+        <div><b>CPS</b><span id="c-cps">-</span></div>
+        <div><b>Best</b><span id="c-best">-</span></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+    var pad = $('pad'), dot = $('dot');
+
+    var counts = [0, 0, 0, 0, 0], up = 0, down = 0, tilt = 0;
+    var tiles = {};
+    Array.prototype.forEach.call(document.querySelectorAll('.tile'), function (t) { tiles[t.getAttribute('data-b')] = t; });
+
+    function bump(b, isDown) {
+      var t = tiles[b]; if (!t) return;
+      if (isDown) { counts[b]++; t.querySelector('span').textContent = counts[b]; t.classList.add('down', 'seen'); }
+      else t.classList.remove('down');
+    }
+
+    // Keep the browser's own mouse behaviour (middle-click scroll, back/forward navigation, menus) out of the pad.
+    ['mousedown', 'mouseup', 'auxclick', 'contextmenu', 'dblclick'].forEach(function (ev) { pad.addEventListener(ev, function (e) { e.preventDefault(); }); });
+
+    // ---- chatter / double click timing (left button) ----
+    var lastLeft = 0, minGap = Infinity, bad = 0, CHATTER = 80;
+    function leftDown(t) {
+      if (lastLeft) {
+        var gap = t - lastLeft;
+        $('d-last').textContent = Math.round(gap) + ' ms';
+        if (gap < minGap) { minGap = gap; $('d-min').textContent = Math.round(gap) + ' ms'; }
+        if (gap < CHATTER) {
+          bad++; $('d-bad').textContent = bad;
+          $('d-flag').className = 'flag err';
+          $('d-flag').textContent = 'Two clicks registered ' + Math.round(gap) + ' ms apart. If you only clicked once, this switch may be double-clicking.';
+        } else if (!bad) { $('d-flag').className = 'flag muted'; $('d-flag').textContent = gap < 500 ? 'Normal double-click (' + Math.round(gap) + ' ms).' : 'No chatter detected so far.'; }
+      }
+      lastLeft = t;
+    }
+
+    pad.addEventListener('pointerdown', function (e) {
+      pad.classList.add('active'); pad.focus({ preventScroll: true });
+      bump(e.button, true);
+      if (e.button === 0) leftDown(e.timeStamp);
+    });
+    window.addEventListener('pointerup', function (e) { bump(e.button, false); });
+    window.addEventListener('pointercancel', function () { Object.keys(tiles).forEach(function (b) { bump(b, false); }); });
+    window.addEventListener('blur', function () { Object.keys(tiles).forEach(function (b) { bump(b, false); }); });
+    pad.addEventListener('pointerleave', function () { pad.classList.remove('active'); dot.style.opacity = 0; });
+
+    // ---- movement, speed, update rate ----
+    var lastPt = null, stamps = [], speedTimer;
+    function move(e) {
+      var r = pad.getBoundingClientRect(), x = Math.round(e.clientX - r.left), y = Math.round(e.clientY - r.top);
+      $('s-pos').textContent = x + ', ' + y;
+      dot.style.opacity = 1; dot.style.left = x + 'px'; dot.style.top = y + 'px';
+      var now = e.timeStamp;
+      if (lastPt && now > lastPt.t) {
+        var v = Math.hypot(e.clientX - lastPt.x, e.clientY - lastPt.y) / ((now - lastPt.t) / 1000);
+        $('s-speed').textContent = Math.round(v) + ' px/s';
+        clearTimeout(speedTimer); speedTimer = setTimeout(function () { $('s-speed').textContent = '0 px/s'; }, 150);
+      }
+      lastPt = { x: e.clientX, y: e.clientY, t: now };
+      stamps.push(now); if (stamps.length > 120) stamps.shift();
+      if (stamps.length >= 20) {
+        var gaps = []; for (var i = 1; i < stamps.length; i++) { var g = stamps[i] - stamps[i - 1]; if (g > 0 && g < 100) gaps.push(g); }
+        if (gaps.length >= 15) { gaps.sort(function (a, b) { return a - b; }); $('s-hz').textContent = '~' + Math.round(1000 / gaps[Math.floor(gaps.length / 2)]) + ' Hz'; }
+      }
+    }
+    var rawSupported = 'onpointerrawupdate' in window;
+    pad.addEventListener(rawSupported ? 'pointerrawupdate' : 'pointermove', move);
+
+    // ---- wheel ----
+    pad.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      if (e.deltaY < 0) { up++; $('s-up').textContent = up; }
+      else if (e.deltaY > 0) { down++; $('s-down').textContent = down; }
+      if (e.deltaX) { tilt++; $('s-tilt').textContent = tilt; }
+    }, { passive: false });
+
+    $('reset').addEventListener('click', function () {
+      counts = [0, 0, 0, 0, 0]; up = down = tilt = 0; bad = 0; minGap = Infinity; lastLeft = 0; stamps = []; lastPt = null;
+      Object.keys(tiles).forEach(function (b) { tiles[b].classList.remove('down', 'seen'); tiles[b].querySelector('span').textContent = 0; });
+      ['s-up', 's-down', 's-tilt', 'd-bad'].forEach(function (id) { $(id).textContent = 0; });
+      ['s-pos', 's-speed', 's-hz', 'd-last', 'd-min'].forEach(function (id) { $(id).textContent = '-'; });
+      $('d-flag').textContent = '';
+    });
+
+    // ---- CPS test ----
+    var cps = { n: 0, start: 0, running: false, timer: null, best: 0, dur: 5 };
+    function cpsEnd() {
+      cps.running = false; clearInterval(cps.timer);
+      var v = cps.n / cps.dur;
+      $('c-cps').textContent = v.toFixed(1); $('c-t').textContent = '0.0 s';
+      if (v > cps.best) { cps.best = v; $('c-best').textContent = v.toFixed(1); }
+      $('cps').classList.remove('run'); $('cps').textContent = 'Done: ' + v.toFixed(1) + ' clicks per second. Click to go again.';
+      cps.done = true;
+    }
+    $('cps').addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (cps.done) { cps.done = false; cps.n = 0; $('c-n').textContent = 0; $('c-cps').textContent = '-'; }
+      if (!cps.running) {
+        cps.dur = +$('dur').value; cps.running = true; cps.start = performance.now(); cps.n = 0;
+        $('cps').classList.add('run');
+        cps.timer = setInterval(function () {
+          var left = cps.dur - (performance.now() - cps.start) / 1000;
+          if (left <= 0) { cpsEnd(); return; }
+          $('c-t').textContent = left.toFixed(1) + ' s';
+          $('c-cps').textContent = (cps.n / Math.max(0.2, cps.dur - left)).toFixed(1);
+        }, 50);
+      }
+      cps.n++; $('c-n').textContent = cps.n; $('cps').textContent = 'Keep clicking!';
+    });
+    $('cps').addEventListener('keydown', function (e) { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); });
+    $('dur').addEventListener('change', function () { if (!cps.running) { cps.dur = +$('dur').value; } });
+  </script>
+</body>
+</html>

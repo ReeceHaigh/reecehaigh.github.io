@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<title>Gamepad Tester - Reece Haigh</title>
+<meta name="description" content="Test controller buttons, triggers and sticks live, check for stick drift and try vibration.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  .pads { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+  .gb { position: relative; overflow: hidden; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 6px 10px; text-align: center; transition: border-color .06s; }
+  .gb b { display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .gb span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .gb i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--accent); width: 0; }
+  .gb.on { border-color: var(--accent); background: #12342a; }
+  .gb.on b { color: var(--accent); }
+  .sticks { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+  .stick { width: 120px; height: 120px; border-radius: 50%; border: 1px solid #3a414c; background: #0f1216; position: relative; flex: none; }
+  .stick::before { content: ""; position: absolute; left: 50%; top: 50%; width: 20%; height: 20%; transform: translate(-50%, -50%); border-radius: 50%; border: 1px dashed var(--border); }
+  .stick .p { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent); left: 50%; top: 50%; box-shadow: 0 0 0 5px rgba(110, 231, 183, .15); }
+  .axes { flex: 1; min-width: 220px; }
+  .axis { display: grid; grid-template-columns: 70px 1fr 56px; gap: 10px; align-items: center; font-size: 13px; margin: 6px 0; }
+  .axis .tr { position: relative; height: 8px; border-radius: 999px; background: var(--border); }
+  .axis .tr::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: #3a414c; }
+  .axis .tr i { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 999px; }
+  .axis span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: right; }
+  .state { display: flex; gap: 12px; align-items: center; }
+  .led { width: 12px; height: 12px; border-radius: 50%; background: #3a414c; flex: none; }
+  .led.on { background: var(--accent); box-shadow: 0 0 0 4px rgba(110, 231, 183, .2); }
+  .drift { margin-top: 12px; font-size: 14px; }
+  .drift div { margin: 4px 0; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">&larr; All tools</a>
+    </div>
+  </header>
+
+  <main class="wrap tool">
+    <div class="page-head">
+      <span class="eyebrow">Hardware</span>
+      <h1 class="title">Gamepad Tester</h1>
+      <p class="lead">Plug in or pair a controller, then press any button. Buttons, triggers and sticks show live, and you can check for stick drift and test vibration.</p>
+    </div>
+
+    <div class="panel">
+      <div class="state"><span class="led" id="led"></span><div><div id="status" style="font-weight:600">No controller detected</div><div class="muted small" id="sub">Press any button on your controller. Browsers only reveal a gamepad after it is used.</div></div></div>
+      <div id="picker" class="row" style="margin-top:12px" hidden><label class="muted small" for="sel">Controller</label><select id="sel" style="width:auto;max-width:100%"></select></div>
+      <dl class="kv" id="info" style="margin-top:12px" hidden></dl>
+    </div>
+
+    <div id="live" hidden>
+      <div class="panel" style="margin-top:16px">
+        <h2>Buttons</h2>
+        <div class="pads" id="buttons"></div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Sticks and axes</h2>
+        <div class="sticks">
+          <div id="sticks" class="sticks"></div>
+          <div class="axes" id="axes"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Checks</h2>
+        <div class="row">
+          <button class="btn" type="button" id="drift">Test stick drift</button>
+          <button class="btn" type="button" id="rumble">Test vibration</button>
+          <span class="muted small" id="rumblenote"></span>
+        </div>
+        <div class="drift" id="driftout" aria-live="polite"></div>
+        <p class="muted small" style="margin:12px 0 0">For the drift test, let go of the sticks completely. It samples for 3 seconds and reports how far each stick strays from centre.</p>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    var $ = function (id) { return document.getElementById(id); };
+
+    var STD = ['A / Cross', 'B / Circle', 'X / Square', 'Y / Triangle', 'LB / L1', 'RB / R1', 'LT / L2', 'RT / R2', 'Back / Select', 'Start', 'L stick', 'R stick', 'D-pad up', 'D-pad down', 'D-pad left', 'D-pad right', 'Home'];
+    var AXES_STD = ['Left X', 'Left Y', 'Right X', 'Right Y'];
+
+    var selected = null;           // gamepad index
+    var built = null;              // signature of the UI that is currently built
+    var btnEls = [], axisEls = [], stickEls = [];
+    var sampling = null;           // drift sampling state
+
+    function getPads() {
+      var list = (navigator.getGamepads && navigator.getGamepads()) || [];
+      return Array.prototype.filter.call(list, function (g) { return g && g.connected; });
+    }
+
+    function sig(g) { return g.index + '|' + g.id + '|' + g.buttons.length + '|' + g.axes.length; }
+
+    function build(g) {
+      built = sig(g);
+      var std = g.mapping === 'standard';
+      var b = $('buttons'); b.textContent = ''; btnEls = [];
+      for (var i = 0; i < g.buttons.length; i++) {
+        var d = document.createElement('div'); d.className = 'gb';
+        d.innerHTML = '<b></b><span>0.00</span><i></i>';
+        d.children[0].textContent = std && STD[i] ? STD[i] : 'Button ' + i;
+        b.appendChild(d); btnEls.push(d);
+      }
+      var a = $('axes'); a.textContent = ''; axisEls = [];
+      for (var j = 0; j < g.axes.length; j++) {
+        var r = document.createElement('div'); r.className = 'axis';
+        r.innerHTML = '<label></label><div class="tr"><i></i></div><span>0.00</span>';
+        r.children[0].textContent = std && AXES_STD[j] ? AXES_STD[j] : 'Axis ' + j;
+        a.appendChild(r); axisEls.push(r);
+      }
+      var s = $('sticks'); s.textContent = ''; stickEls = [];
+      for (var k = 0; k + 1 < g.axes.length && k < 4; k += 2) {
+        var st = document.createElement('div'); st.className = 'stick'; st.innerHTML = '<div class="p"></div>';
+        st.title = (std ? (k === 0 ? 'Left' : 'Right') + ' stick' : 'Axes ' + k + ' and ' + (k + 1));
+        s.appendChild(st); stickEls.push({ el: st.firstChild, ax: k });
+      }
+      var info = $('info'); info.textContent = '';
+      [['Name', g.id], ['Index', String(g.index)], ['Mapping', g.mapping || 'non-standard (generic)'], ['Buttons', String(g.buttons.length)], ['Axes', String(g.axes.length)]].forEach(function (kv) {
+        var dt = document.createElement('dt'), dd = document.createElement('dd'), sp = document.createElement('span');
+        dt.textContent = kv[0]; sp.textContent = kv[1]; dd.appendChild(sp); info.appendChild(dt); info.appendChild(dd);
+      });
+      var can = !!(g.vibrationActuator && g.vibrationActuator.playEffect) || !!(g.hapticActuators && g.hapticActuators.length);
+      $('rumble').disabled = !can; $('rumblenote').textContent = can ? '' : 'Vibration is not supported by this controller or browser.';
+    }
+
+    function frame() {
+      requestAnimationFrame(frame);
+      var pads = getPads(), led = $('led');
+      if (!pads.length) {
+        led.className = 'led'; $('status').textContent = 'No controller detected';
+        $('sub').style.display = ''; $('live').hidden = true; $('info').hidden = true; $('picker').hidden = true; built = null; selected = null;
+        return;
+      }
+      // picker
+      var sel = $('sel');
+      if (pads.length > 1) {
+        $('picker').hidden = false;
+        if (sel.options.length !== pads.length || Array.prototype.some.call(sel.options, function (o, i) { return +o.value !== pads[i].index; })) {
+          sel.textContent = '';
+          pads.forEach(function (p) { var o = document.createElement('option'); o.value = p.index; o.textContent = p.index + ': ' + p.id.slice(0, 60); sel.appendChild(o); });
+          if (selected !== null && pads.some(function (p) { return p.index === selected; })) sel.value = selected;
+        }
+        selected = +sel.value;
+      } else { $('picker').hidden = true; selected = pads[0].index; }
+      var g = pads.filter(function (p) { return p.index === selected; })[0] || pads[0];
+
+      led.className = 'led on'; $('status').textContent = 'Controller connected';
+      $('sub').style.display = 'none'; $('live').hidden = false; $('info').hidden = false;
+      if (built !== sig(g)) build(g);
+
+      for (var i = 0; i < g.buttons.length && i < btnEls.length; i++) {
+        var bt = g.buttons[i], v = typeof bt === 'object' ? bt.value : +bt, on = typeof bt === 'object' ? bt.pressed : bt > 0.5, el = btnEls[i];
+        el.classList.toggle('on', !!on);
+        el.children[1].textContent = (+v).toFixed(2);
+        el.children[2].style.width = Math.round(Math.max(0, Math.min(1, v)) * 100) + '%';
+      }
+      for (var j = 0; j < g.axes.length && j < axisEls.length; j++) {
+        var x = g.axes[j], bar = axisEls[j].querySelector('i');
+        bar.style.left = (x < 0 ? 50 + x * 50 : 50) + '%'; bar.style.width = Math.abs(x) * 50 + '%';
+        axisEls[j].querySelector('span').textContent = x.toFixed(2);
+      }
+      stickEls.forEach(function (s) {
+        var x = g.axes[s.ax] || 0, y = g.axes[s.ax + 1] || 0, m = Math.hypot(x, y), k = m > 1 ? 1 / m : 1;
+        s.el.style.left = (50 + x * k * 46) + '%'; s.el.style.top = (50 + y * k * 46) + '%';
+      });
+      if (sampling) sample(g);
+    }
+
+    // ---- drift test ----
+    function sample(g) {
+      var now = performance.now();
+      for (var k = 0; k + 1 < g.axes.length && k < 4; k += 2) {
+        var m = Math.hypot(g.axes[k], g.axes[k + 1]);
+        sampling.max[k / 2] = Math.max(sampling.max[k / 2] || 0, m);
+        sampling.avgx[k / 2] = (sampling.avgx[k / 2] || 0) + g.axes[k]; sampling.avgy[k / 2] = (sampling.avgy[k / 2] || 0) + g.axes[k + 1];
+      }
+      sampling.n++;
+      var left = Math.max(0, 3 - (now - sampling.t0) / 1000);
+      $('driftout').textContent = 'Sampling... hands off the sticks (' + left.toFixed(1) + 's)';
+      if (left <= 0) finishDrift(g);
+    }
+    function finishDrift(g) {
+      var s = sampling; sampling = null; $('drift').disabled = false;
+      var out = $('driftout'); out.textContent = '';
+      var names = g.mapping === 'standard' ? ['Left stick', 'Right stick'] : ['Axes 0-1', 'Axes 2-3'];
+      var any = false;
+      Object.keys(s.max).forEach(function (i) {
+        any = true;
+        var m = s.max[i], cx = s.avgx[i] / s.n, cy = s.avgy[i] / s.n, rest = Math.hypot(cx, cy);
+        var verdict, cls;
+        if (m < 0.05) { verdict = 'Excellent: sits at centre'; cls = 'ok'; }
+        else if (m < 0.1) { verdict = 'Good: tiny deviation, inside a normal deadzone'; cls = 'ok'; }
+        else if (m < 0.2) { verdict = 'Noticeable drift: games without a deadzone may react'; cls = ''; }
+        else { verdict = 'Significant drift: this stick is not resting at centre'; cls = 'err'; }
+        var d = document.createElement('div'); d.className = cls;
+        d.textContent = names[i] + ': max ' + m.toFixed(3) + ', resting offset ' + rest.toFixed(3) + ' (' + (s.n) + ' samples) - ' + verdict;
+        out.appendChild(d);
+      });
+      if (!any) out.textContent = 'This controller has no stick axes to test.';
+    }
+    $('drift').addEventListener('click', function () {
+      sampling = { t0: performance.now(), n: 0, max: {}, avgx: {}, avgy: {} }; this.disabled = true;
+    });
+
+    // ---- vibration ----
+    $('rumble').addEventListener('click', function () {
+      var g = getPads().filter(function (p) { return p.index === selected; })[0]; if (!g) return;
+      try {
+        if (g.vibrationActuator && g.vibrationActuator.playEffect) g.vibrationActuator.playEffect('dual-rumble', { startDelay: 0, duration: 700, weakMagnitude: 0.8, strongMagnitude: 0.8 });
+        else if (g.hapticActuators && g.hapticActuators[0] && g.hapticActuators[0].pulse) g.hapticActuators[0].pulse(0.8, 700);
+      } catch (e) { $('rumblenote').textContent = 'Could not start vibration: ' + e.message; }
+    });
+
+    window.addEventListener('gamepadconnected', function () { built = null; });
+    window.addEventListener('gamepaddisconnected', function () { built = null; });
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

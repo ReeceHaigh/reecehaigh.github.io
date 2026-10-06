@@ -206,3 +206,26 @@ footer.site { border-top: 1px solid var(--border); padding: 28px 0; text-align: 
   *, ::before, ::after { transition: none !important; }
   .btn:hover, .btn:active, .card:hover { transform: none; }
 }
+
+/* ---- Shared bits used by several tools ---- */
+.btn.sm { padding: 6px 12px; font-size: 13px; }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+dl.kv { margin: 0; display: grid; grid-template-columns: minmax(110px, 30%) 1fr; }
+dl.kv dt, dl.kv dd { margin: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+dl.kv dt:first-of-type, dl.kv dt:first-of-type + dd { border-top: 0; }
+dl.kv dt { color: var(--muted); font-size: 14.5px; padding-right: 16px; }
+dl.kv dd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 13.5px; word-break: break-word; display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+dl.kv dd .copy { flex: none; }
+@media (max-width: 560px) {
+  dl.kv { grid-template-columns: 1fr; }
+  dl.kv dt { padding: 10px 0 0; border-top: 1px solid var(--border); }
+  dl.kv dt:first-of-type { border-top: 0; }
+  dl.kv dd { padding: 2px 0 10px; border-top: 0; }
+}
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.stats > div { background: #0f1216; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+.stats b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.stats span { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; }
