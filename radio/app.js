@@ -252,6 +252,23 @@ class PlexAPI {
         (c.Metadata || []).filter(p => p.playlistType === "audio")));
   }
 
+  // Artists, albums and tracks matching `query`, as three parallel searches.
+  async searchAll(sectionKey, query) {
+    const q = encodeURIComponent(query);
+    const one = (type, size) =>
+      this.get(`/library/sections/${sectionKey}/search?query=${q}&type=${type}&X-Plex-Container-Start=0&X-Plex-Container-Size=${size}`)
+        .then(c => c.Metadata || []).catch(() => []);
+    const [artists, albums, tracks] = await Promise.all([one(8, 12), one(9, 12), one(10, 25)]);
+    return { artists, albums, tracks };
+  }
+
+  // The most recently played track (seed for the Sonic Mix), or null.
+  async getLastPlayedTrack(sectionKey) {
+    const c = await this.get(`/library/sections/${sectionKey}/all?type=10&sort=lastViewedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=1`);
+    const t = (c.Metadata || [])[0];
+    return t && t.lastViewedAt ? t : null;
+  }
+
   getAllLeaves(ratingKey) {
     return this.get(`/library/metadata/${ratingKey}/allLeaves`).then(c => c.Metadata || []);
   }
@@ -498,8 +515,7 @@ const el = (id) => document.getElementById(id);
 // currentColor, so colour/active state is plain CSS).
 const icon = (name) => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const TRACK_ACTIONS = `
-      <button class="add-to-queue-btn" title="Add to queue" aria-label="Add to queue">${icon("plus")}</button>
-      <button class="add-to-playlist-btn" title="Add to playlist" aria-label="Add to playlist">${icon("playlist-add")}</button>
+      <button class="more-btn" title="More" aria-label="More actions" aria-haspopup="menu">${icon("more")}</button>
       <button class="favorite-btn" title="Favorite" aria-label="Favorite">${icon("star")}</button>`;
 
 // Paints the filled part of a range slider (see the --pct rule in style.css).
@@ -621,6 +637,8 @@ async function showHome() {
   switchView("home");
   const container = el("view-home");
   container.innerHTML = `
+    <div class="section-heading">Mixes</div>
+    <div class="shelf" id="home-mixes"></div>
     <div id="home-played" class="hidden">
       <div class="section-heading">Recently Played</div>
       <div class="shelf" id="home-played-shelf"></div>
@@ -628,6 +646,7 @@ async function showHome() {
     <div class="section-heading">Recently Added</div>
     <div class="grid" id="home-grid"></div>`;
   const grid = el("home-grid");
+  MIXES.forEach(m => el("home-mixes").appendChild(renderMixCard(m)));
   // Recently played is a nice-to-have: if the request fails or nothing has been
   // played yet, the section just stays hidden.
   api.getRecentlyPlayed(musicSectionKey).then((albums) => {
@@ -916,29 +935,55 @@ ${TRACK_ACTIONS}
 }
 
 let searchSeq = 0;
-async function showSearchResults(query) {
-  const seq = ++searchSeq;
-  switchView("search");
-  const container = el("view-search");
-  container.innerHTML = `<div class="section-heading">Results for "${esc(query)}"</div><div id="search-tracks"></div>`;
-  const results = await api.search(musicSectionKey, query);
-  if (seq !== searchSeq) return; // a newer search superseded this one
-  const list = el("search-tracks");
-  results.forEach((track, i) => {
-    const row = document.createElement("div");
-    row.className = "track-row";
-    row.innerHTML = `
+function trackSearchRow(track, results, i) {
+  const row = document.createElement("div");
+  row.className = "track-row";
+  row.dataset.ratingKey = track.ratingKey;
+  row.innerHTML = `
       <div class="idx">♪</div>
       <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
 ${TRACK_ACTIONS}
     `;
-    row.onclick = () => playQueue(results, i);
-    wireAddToQueueButton(row, track);
-    wireAddToPlaylistButton(row, track);
-    wireFavoriteButton(row, track);
-    list.appendChild(row);
-  });
+  row.onclick = () => playQueue(results, i);
+  wireAddToQueueButton(row, track);
+  wireFavoriteButton(row, track);
+  return row;
+}
+
+async function showSearchResults(query) {
+  const seq = ++searchSeq;
+  switchView("search");
+  const container = el("view-search");
+  container.innerHTML = `<div class="section-heading">Results for "${esc(query)}"</div><div id="search-body"><p style="color:var(--text-dim)">Searching…</p></div>`;
+  const { artists, albums, tracks } = await api.searchAll(musicSectionKey, query);
+  if (seq !== searchSeq) return; // a newer search superseded this one
+  const body = el("search-body");
+  body.innerHTML = "";
+  if (!artists.length && !albums.length && !tracks.length) {
+    body.innerHTML = `<p style="color:var(--text-dim)">Nothing found.</p>`;
+    return;
+  }
+  const shelf = (title, items, render) => {
+    if (!items.length) return;
+    const h = document.createElement("div");
+    h.className = "section-heading sub";
+    h.textContent = title;
+    const sh = document.createElement("div");
+    sh.className = "shelf";
+    items.forEach(it => sh.appendChild(render(it)));
+    body.append(h, sh);
+  };
+  shelf("Artists", artists, renderArtistCard);
+  shelf("Albums", albums, renderAlbumCard);
+  if (tracks.length) {
+    const h = document.createElement("div");
+    h.className = "section-heading sub";
+    h.textContent = "Tracks";
+    const list = document.createElement("div");
+    tracks.forEach((t, i) => list.appendChild(trackSearchRow(t, tracks, i)));
+    body.append(h, list);
+  }
 }
 
 // ---------- Playback ----------
@@ -999,6 +1044,71 @@ function setPlayIcon(isPlaying) {
   el("fs-play").setAttribute("aria-label", isPlaying ? "Pause" : "Play");
 }
 
+// ---------- Album-art colours ----------
+// Picks a vibrant dominant colour from the (same-origin, so canvas-safe) artwork
+// and uses it as the accent in the mini-player and full-screen player, plus a
+// faint glow behind the page. Falls back to the default amber for grey/dark art.
+
+const artColorCache = new Map(); // url -> [h, s, l] | null (in memory only)
+let artColorToken = 0;
+
+function dominantColor(img) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, 32, 32);
+  const { data } = ctx.getImageData(0, 0, 32, 32);
+  const buckets = Array.from({ length: 24 }, () => ({ w: 0, h: 0, s: 0, l: 0 }));
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue;
+    const r = data[i] / 255, g = data[i + 1] / 255, b = data[i + 2] / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    const l = (max + min) / 2;
+    if (d === 0) continue;
+    const s = d / (1 - Math.abs(2 * l - 1));
+    if (l < 0.12 || l > 0.92 || s < 0.2) continue;
+    let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h = (h * 60 + 360) % 360;
+    const w = s * (1 - Math.abs(l - 0.5) * 1.2);
+    const bk = buckets[Math.floor(h / 15)];
+    bk.w += w; bk.h += h * w; bk.s += s * w; bk.l += l * w;
+  }
+  const best = buckets.reduce((a, b) => (b.w > a.w ? b : a));
+  if (best.w < 0.5) return null;
+  return [best.h / best.w, best.s / best.w, best.l / best.w];
+}
+
+function setArtAccent(hsl) {
+  const targets = [el("now-playing"), el("now-playing-full")];
+  const props = ["--accent", "--accent-hot", "--accent-soft"];
+  if (!hsl) {
+    targets.forEach(t => props.forEach(p => t.style.removeProperty(p)));
+    el("content").style.removeProperty("--glow");
+    return;
+  }
+  const h = Math.round(hsl[0]);
+  const sat = Math.round(Math.min(0.92, Math.max(0.5, hsl[1])) * 100);
+  const lum = Math.round(Math.min(0.7, Math.max(0.58, hsl[2])) * 100);
+  const vals = [`hsl(${h} ${sat}% ${lum}%)`, `hsl(${h} ${sat}% ${Math.min(80, lum + 8)}%)`, `hsl(${h} ${sat}% ${lum}% / 0.16)`];
+  targets.forEach(t => props.forEach((p, i) => t.style.setProperty(p, vals[i])));
+  el("content").style.setProperty("--glow", `hsl(${h} ${sat}% 50% / 0.10)`);
+}
+
+function applyArtColors(url) {
+  const token = ++artColorToken;
+  if (!url) return setArtAccent(null);
+  if (artColorCache.has(url)) return setArtAccent(artColorCache.get(url));
+  const img = new Image();
+  img.onload = () => {
+    let hsl = null;
+    try { hsl = dominantColor(img); } catch (e) { /* canvas blocked — keep default */ }
+    artColorCache.set(url, hsl);
+    if (token === artColorToken) setArtAccent(hsl);
+  };
+  img.onerror = () => { if (token === artColorToken) setArtAccent(null); };
+  img.src = url;
+}
+
 function syncNowPlayingUI(track) {
   const artist = track.grandparentTitle || track.originalTitle || "";
   const artUrl = api.thumbUrl(track.parentThumb || track.thumb, 80);
@@ -1007,6 +1117,7 @@ function syncNowPlayingUI(track) {
   el("np-title").textContent = track.title;
   el("np-artist").textContent = artist;
   el("np-art").src = artUrl;
+  applyArtColors(artUrl);
 
   el("fs-title").textContent = track.title;
   el("fs-artist").textContent = track.parentTitle ? `${artist} — ${track.parentTitle}` : artist;
@@ -1115,23 +1226,229 @@ function showFsView(mode) {
 
 // ---------- Queue management ----------
 
-function addToQueue(track) {
-  queue.push(track);
-  order.push(queue.length - 1);
-  showToast(`Added "${track.title}" to queue`);
+// Anything that changes what plays *next* (add, play-next, reorder, remove,
+// shuffle) must discard the preloaded standby track and any crossfade into it,
+// or the old next track would still be the one that gets blended in.
+function queueChanged() {
+  interruptCrossfade();
+  if (preloadedNextTrack || preloadTriggered) {
+    standby.pause();
+    standby.removeAttribute("src");
+    standby.load();
+    preloadedNextTrack = null;
+    preloadTriggered = false;
+  }
   refreshQueueViewIfOpen();
   savePlaybackState();
 }
 
-function wireAddToQueueButton(row, track) {
-  const btn = row.querySelector(".add-to-queue-btn");
-  if (btn) btn.onclick = (e) => { e.stopPropagation(); addToQueue(track); };
+function addToQueue(track) {
+  queue.push(track);
+  order.push(queue.length - 1);
+  showToast(`Added "${track.title}" to queue`);
+  queueChanged();
 }
 
-function wireAddToPlaylistButton(row, track) {
-  const btn = row.querySelector(".add-to-playlist-btn");
-  if (btn) btn.onclick = (e) => { e.stopPropagation(); openPlaylistPicker(track); };
+function playNext(track) {
+  if (!queue.length) { playQueue([track], 0); return; }
+  queue.push(track);
+  order.splice(orderPos + 1, 0, queue.length - 1);
+  showToast(`Playing "${track.title}" next`);
+  queueChanged();
 }
+
+// ---------- Popup menu (row actions, sleep timer) ----------
+
+let menuEl = null;
+function closeMenu() {
+  if (!menuEl) return;
+  menuEl.remove();
+  menuEl = null;
+  document.removeEventListener("pointerdown", onMenuOutside, true);
+  document.removeEventListener("keydown", onMenuKey, true);
+  window.removeEventListener("resize", closeMenu);
+}
+function onMenuOutside(e) { if (menuEl && !menuEl.contains(e.target)) closeMenu(); }
+function onMenuKey(e) {
+  if (!menuEl) return;
+  if (e.key === "Escape") { closeMenu(); return; }
+  const items = [...menuEl.querySelectorAll(".popup-item")];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+  if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+}
+// items: [{ label, icon?, onClick, active? } | { divider: true }]
+function showMenu(anchor, items) {
+  closeMenu();
+  const m = document.createElement("div");
+  m.className = "popup-menu";
+  m.setAttribute("role", "menu");
+  items.forEach((it) => {
+    if (it.divider) { const d = document.createElement("div"); d.className = "popup-divider"; m.appendChild(d); return; }
+    const b = document.createElement("button");
+    b.className = "popup-item" + (it.active ? " active" : "");
+    b.setAttribute("role", "menuitem");
+    b.innerHTML = `${it.icon ? icon(it.icon) : '<span class="ico"></span>'}<span>${esc(it.label)}</span>`;
+    b.onclick = (e) => { e.stopPropagation(); closeMenu(); it.onClick(); };
+    m.appendChild(b);
+  });
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.right - m.offsetWidth), window.innerWidth - m.offsetWidth - 8);
+  let top = r.bottom + 6;
+  if (top + m.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - m.offsetHeight - 6);
+  m.style.left = `${left}px`;
+  m.style.top = `${top}px`;
+  menuEl = m;
+  m.querySelector(".popup-item")?.focus();
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onMenuOutside, true);
+    document.addEventListener("keydown", onMenuKey, true);
+    window.addEventListener("resize", closeMenu);
+  }, 0);
+}
+
+// ---------- Smart mixes / track radio ----------
+
+function sample(arr, n) { return shuffleArray(arr).slice(0, n); }
+
+function enableRadioMode() {
+  if (radioOn) return;
+  radioOn = true;
+  store.radioMode = true;
+  updateShuffleRepeatUI();
+}
+
+// Plays `seed` and then tracks Plex judges sonically similar, and leaves radio
+// mode on so the queue keeps extending itself.
+async function startTrackRadio(seed) {
+  showToast("Building radio…");
+  try {
+    const similar = await api.getSonicallySimilar(seed.ratingKey, 50);
+    if (!similar.length) return showToast("No similar tracks found — Plex needs to have run sonic analysis");
+    setShuffle(false);
+    enableRadioMode();
+    playQueue([seed, ...similar.filter(t => t.ratingKey !== seed.ratingKey)], 0);
+    showToast(`Radio from "${seed.title}"`);
+  } catch (e) {
+    showToast("Couldn't build radio");
+  }
+}
+
+const MIXES = [
+  { id: "sonic", title: "Sonic Mix", sub: "Based on what you played last", icon: "radio", hue: 35 },
+  { id: "favorites", title: "Favorites Mix", sub: "Your starred tracks, shuffled", icon: "star", hue: 335 },
+  { id: "discover", title: "Discover Mix", sub: "Tracks you haven't played yet", icon: "sparkles", hue: 205 },
+  { id: "rediscover", title: "Rediscover Mix", sub: "Old favorites, not heard lately", icon: "clock", hue: 150 },
+];
+
+async function playMix(mix) {
+  showToast(`Building ${mix.title}…`);
+  try {
+    if (mix.id === "sonic") {
+      const seed = await api.getLastPlayedTrack(musicSectionKey);
+      if (!seed) return showToast("Play something first, then this mix has a starting point");
+      return startTrackRadio(seed);
+    }
+    const all = await api.getAllTracks(musicSectionKey);
+    const ninetyDays = Date.now() / 1000 - 90 * 24 * 3600;
+    const pool =
+      mix.id === "favorites" ? all.filter(isFavorited) :
+      mix.id === "discover" ? all.filter(t => !t.viewCount) :
+      all.filter(t => t.viewCount && t.lastViewedAt && t.lastViewedAt < ninetyDays);
+    if (pool.length < 5) return showToast(mix.id === "favorites" ? "Star a few tracks first" : "Not enough tracks for this mix yet");
+    setShuffle(false);
+    playQueue(sample(pool, 50), 0);
+    showToast(`Playing ${mix.title}`);
+  } catch (e) {
+    showToast("Couldn't build mix");
+  }
+}
+
+function renderMixCard(mix) {
+  const div = document.createElement("div");
+  div.className = "card mix";
+  div.tabIndex = 0;
+  div.innerHTML = `
+    <div class="mix-art" style="--h:${mix.hue}">${icon(mix.icon)}</div>
+    <div class="card-title">${esc(mix.title)}</div>
+    <div class="card-sub">${esc(mix.sub)}</div>`;
+  div.onclick = () => playMix(mix);
+  div.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); playMix(mix); } };
+  return div;
+}
+
+// ---------- Sleep timer ----------
+
+const sleep = { mode: null, endsAt: 0, timer: null }; // mode: null | "time" | "track"
+
+function sleepActive() { return sleep.mode !== null; }
+function cancelSleep() {
+  clearTimeout(sleep.timer);
+  sleep.mode = null;
+  sleep.timer = null;
+  el("fs-sleep-toggle").classList.remove("active");
+}
+function setSleep(mode, minutes) {
+  cancelSleep();
+  if (!mode) return showToast("Sleep timer off");
+  sleep.mode = mode;
+  el("fs-sleep-toggle").classList.add("active");
+  if (mode === "time") {
+    sleep.endsAt = Date.now() + minutes * 60000;
+    sleep.timer = setTimeout(sleepFire, minutes * 60000);
+    showToast(`Sleep timer: ${minutes} min`);
+  } else {
+    showToast("Sleep timer: after this track");
+  }
+}
+// Fades out over a few seconds (where volume is controllable), then pauses.
+function sleepFire() {
+  cancelSleep();
+  interruptCrossfade();
+  if (audio.paused) return;
+  if (!VOLUME_CONTROLLABLE) { audio.pause(); showToast("Sleep timer: stopped"); return; }
+  const startVol = audio.volume, t0 = performance.now(), ms = 6000;
+  const id = setInterval(() => {
+    const p = Math.min(1, (performance.now() - t0) / ms);
+    audio.volume = startVol * (1 - p);
+    if (p >= 1) {
+      clearInterval(id);
+      audio.pause();
+      audio.volume = userVolume;
+      showToast("Sleep timer: stopped");
+    }
+  }, 100);
+}
+function openSleepMenu() {
+  const items = [];
+  if (sleepActive()) {
+    const left = sleep.mode === "time" ? `${Math.max(1, Math.ceil((sleep.endsAt - Date.now()) / 60000))} min left` : "after this track";
+    items.push({ label: `Cancel timer (${left})`, icon: "x", onClick: () => setSleep(null) }, { divider: true });
+  }
+  [15, 30, 45, 60].forEach(m => items.push({ label: `${m} minutes`, icon: "moon", onClick: () => setSleep("time", m) }));
+  items.push({ label: "End of this track", icon: "moon", onClick: () => setSleep("track") });
+  showMenu(el("fs-sleep-toggle"), items);
+}
+
+function wireTrackMenu(row, track) {
+  const btn = row.querySelector(".more-btn");
+  if (!btn) return;
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showMenu(btn, [
+      { label: "Play next", icon: "play-next", onClick: () => playNext(track) },
+      { label: "Add to queue", icon: "plus", onClick: () => addToQueue(track) },
+      { label: "Add to playlist…", icon: "playlist-add", onClick: () => openPlaylistPicker(track) },
+      { label: "Start radio", icon: "radio", onClick: () => startTrackRadio(track) },
+    ]);
+  };
+}
+
+// Rows now have a single "more" menu (play next / add to queue / add to
+// playlist / radio); the old per-row queue + playlist buttons are gone.
+function wireAddToQueueButton(row, track) { wireTrackMenu(row, track); }
+function wireAddToPlaylistButton() { /* handled by the row menu */ }
 
 // ---------- Favorites ----------
 
@@ -1280,15 +1597,67 @@ function moveQueueItem(pos, direction) {
   const target = pos + direction;
   if (target <= orderPos || target >= order.length) return;
   [order[pos], order[target]] = [order[target], order[pos]];
-  renderQueueView();
-  savePlaybackState();
+  queueChanged();
 }
 
 function removeQueueItem(pos) {
   if (pos <= orderPos) return;
   order.splice(pos, 1);
-  renderQueueView();
-  savePlaybackState();
+  queueChanged();
+}
+
+function moveQueueItemTo(from, to) {
+  if (from <= orderPos || to <= orderPos || to >= order.length || from === to) return;
+  const [item] = order.splice(from, 1);
+  order.splice(to, 0, item);
+  queueChanged();
+}
+
+function clearUpNext() {
+  order.splice(orderPos + 1);
+  queueChanged();
+}
+
+// Pointer-based drag (mouse + touch) on a row's grip; arrow keys on the grip
+// also move it, for keyboard users.
+function wireQueueDrag(list, row, pos) {
+  const handle = row.querySelector(".q-handle");
+  handle.onkeydown = (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const to = pos + (e.key === "ArrowUp" ? -1 : 1);
+    moveQueueItemTo(pos, to);
+    list.querySelector(`.q-handle[data-pos="${Math.min(Math.max(to, orderPos + 1), order.length - 1)}"]`)?.focus();
+  };
+  handle.onpointerdown = (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    const rows = [...list.querySelectorAll(".queue-row[data-pos]")].filter(r => +r.dataset.pos > orderPos);
+    const startY = e.clientY;
+    let target = pos;
+    row.classList.add("dragging");
+    const move = (ev) => {
+      row.style.transform = `translateY(${ev.clientY - startY}px)`;
+      target = +rows[0].dataset.pos;
+      rows.forEach((r) => {
+        const b = r.getBoundingClientRect();
+        if (r !== row && ev.clientY > b.top + b.height / 2) target = +r.dataset.pos;
+      });
+      rows.forEach((r) => r.classList.toggle("drop-target", r !== row && +r.dataset.pos === target));
+    };
+    const end = (ev) => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      row.classList.remove("dragging");
+      row.style.transform = "";
+      rows.forEach((r) => r.classList.remove("drop-target"));
+      if (ev.type === "pointerup") moveQueueItemTo(pos, target);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  };
 }
 
 function renderQueueView() {
@@ -1317,13 +1686,15 @@ function renderQueueView() {
     if (pos === orderPos + 1) {
       const h = document.createElement("div");
       h.className = "queue-section-heading";
-      h.textContent = "Up Next";
+      h.innerHTML = `<span>Up Next</span><button class="q-clear">Clear</button>`;
+      h.querySelector(".q-clear").onclick = clearUpNext;
       list.appendChild(h);
     }
 
     const track = queue[queueIdx];
     const row = document.createElement("div");
     row.className = "queue-row" + (pos === orderPos ? " current" : "");
+    row.dataset.pos = pos;
     const canEdit = pos > orderPos;
     row.innerHTML = `
       <div class="queue-row-main">
@@ -1331,14 +1702,13 @@ function renderQueueView() {
         <div class="queue-row-sub">${esc(track.grandparentTitle)}</div>
       </div>
       <div class="queue-row-actions">
-        ${canEdit ? `<button class="q-up" title="Move up" aria-label="Move up">${icon("arrow-up")}</button><button class="q-down" title="Move down" aria-label="Move down">${icon("arrow-down")}</button><button class="q-remove" title="Remove" aria-label="Remove">${icon("x")}</button>` : ""}
+        ${canEdit ? `<button class="q-remove" title="Remove" aria-label="Remove">${icon("x")}</button><button class="q-handle" data-pos="${pos}" title="Drag to reorder" aria-label="Reorder — drag, or use the arrow keys">${icon("grip")}</button>` : ""}
       </div>
     `;
     row.querySelector(".queue-row-main").onclick = () => jumpToQueuePosition(pos);
     if (canEdit) {
-      row.querySelector(".q-up").onclick = () => moveQueueItem(pos, -1);
-      row.querySelector(".q-down").onclick = () => moveQueueItem(pos, 1);
       row.querySelector(".q-remove").onclick = () => removeQueueItem(pos);
+      wireQueueDrag(list, row, pos);
     }
     list.appendChild(row);
   });
@@ -1536,6 +1906,7 @@ function onActiveTimeUpdate() {
   const dur = (track?.duration ? track.duration / 1000 : audio.duration) || 0;
   if (!dur || !isFinite(dur) || repeatMode === "one") return;
   const remaining = dur - audio.currentTime;
+  if (sleep.mode === "track") return; // let this track run out; nothing to preload
 
   if (!preloadTriggered && remaining <= PRELOAD_LEAD_SECONDS) {
     preloadTriggered = true;
@@ -1549,6 +1920,12 @@ function onActiveTimeUpdate() {
 
 function onActiveEnded() {
   cancelCrossfade();
+  if (sleep.mode === "track") {
+    cancelSleep();
+    audio.pause();
+    showToast("Sleep timer: stopped");
+    return;
+  }
   if (repeatMode === "one") {
     scrobbledCurrent = false;
     audio.currentTime = 0;
@@ -1727,6 +2104,7 @@ function setShuffle(on) {
     }
   }
   updateShuffleRepeatUI();
+  if (queue.length) queueChanged();
 }
 
 function cycleRepeat() {
@@ -1804,6 +2182,7 @@ el("fs-seek").oninput = (e) => {
 };
 el("fs-collapse").onclick = closeNowPlayingFull;
 el("fs-lyrics-toggle").onclick = () => showFsView(fsViewMode === "lyrics" ? "now-playing" : "lyrics");
+el("fs-sleep-toggle").onclick = openSleepMenu;
 el("fs-queue-toggle").onclick = () => showFsView(fsViewMode === "queue" ? "now-playing" : "queue");
 el("fs-favorite-toggle").onclick = () => {
   const track = queue[order[orderPos]];
@@ -1886,8 +2265,19 @@ function handleLogoTap() {
 el("sidebar-logo").addEventListener("click", handleLogoTap);
 document.querySelector("#mobile-bar h1").addEventListener("click", handleLogoTap);
 
+// Search as you type on wide screens. On phones the search box lives inside the
+// slide-out menu, which would cover the results, so there it runs on Enter.
+let searchDebounce;
+el("search-input").addEventListener("input", (e) => {
+  clearTimeout(searchDebounce);
+  const q = e.target.value.trim();
+  if (q.length < 2 || window.matchMedia("(max-width: 700px)").matches) return;
+  searchDebounce = setTimeout(() => showSearchResults(q), 250);
+});
 el("search-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.value.trim()) {
+    clearTimeout(searchDebounce);
+    closeSidebar();
     showSearchResults(e.target.value.trim());
   }
 });
