@@ -141,7 +141,7 @@
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
     gap: 16px;
   }
 
@@ -240,6 +240,10 @@
         <a class="card" href="/tools/">
           <h3>Tools <span class="tag">18 tools</span></h3>
           <p>Small, single-purpose web tools - hardware testers, a subnet calculator, regex and JWT tools, hash &amp; encode, a password generator, Pomodoro timer and more. All run in your browser.</p>
+        </a>
+        <a class="card" href="/family-history/">
+          <h3>Family History <span class="tag">Interactive tree</span></h3>
+          <p>An explorable family tree going back to the 1400s: follow parents, spouses and children through the generations, with search and a profile for each person.</p>
         </a>
         <div class="card">
           <h3>Homelab <span class="tag">Self-Hosted</span></h3>
