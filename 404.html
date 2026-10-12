@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
+<meta name="robots" content="noindex">
+<title>Page not found - Reece Haigh</title>
+<meta name="description" content="That page could not be found.">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/tools/tools.css">
+<style>
+  /* Absolute URLs throughout: this page is served at whatever missing path was requested. */
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .stage {
+    flex: 1;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 56px 0;
+    background:
+      radial-gradient(900px 400px at 50% -10%, rgba(110, 231, 183, .10), transparent 70%),
+      linear-gradient(180deg, rgba(11, 13, 16, .55), var(--bg) 85%),
+      url('/assets/images/hero-960.webp') center top / cover no-repeat;
+  }
+  .box { text-align: center; max-width: 620px; }
+  .code {
+    font-size: clamp(88px, 22vw, 168px);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -.02em;
+    background: linear-gradient(180deg, #ffffff 10%, var(--accent) 120%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  h1 { margin: 12px 0 10px; font-size: clamp(24px, 5vw, 34px); }
+  .path {
+    display: inline-block;
+    max-width: 100%;
+    margin: 4px 0 0;
+    padding: 4px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+  .sub { margin: 14px auto 28px; color: #c9ced6; font-size: 17px; max-width: 46ch; }
+  .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .actions .btn { font-size: 15px; padding: 12px 22px; }
+
+  #maybe { margin: 36px auto 0; text-align: left; max-width: 460px; }
+  #maybe[hidden] { display: none; }
+  #maybe h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; text-align: center; }
+  #maybe a {
+    display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+    padding: 12px 16px; margin-top: 8px;
+    background: rgba(20, 23, 28, .85); border: 1px solid var(--border); border-radius: 12px;
+    text-decoration: none; transition: border-color .15s ease;
+  }
+  #maybe a:hover { border-color: var(--accent); }
+  #maybe a b { font-weight: 600; }
+  #maybe a span { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="home" href="/">reecehaigh.com</a>
+      <a href="/tools/">Tools</a>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="wrap">
+      <div class="box">
+        <div class="code" aria-hidden="true">404</div>
+        <h1>Page not found</h1>
+        <div><span class="path" id="path" title=""></span></div>
+        <p class="sub">There's nothing at this address. The link might be mistyped, or the page may have moved or been removed.</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="/">Take me home</a>
+          <a class="btn btn-ghost" href="/tools/">Browse the tools</a>
+        </div>
+
+        <section id="maybe" hidden aria-label="Suggested pages">
+          <h2>Did you mean</h2>
+          <div id="maybe-list"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">&copy; <span id="year"></span> Reece Haigh</footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    // Show what was asked for (textContent only, so a hostile URL can never inject markup).
+    var asked = decodeSafe(location.pathname) + (location.search || '');
+    var pathEl = document.getElementById('path');
+    pathEl.textContent = asked; pathEl.title = asked;
+    document.title = 'Page not found - Reece Haigh';
+
+    function decodeSafe(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+
+    // ---- "Did you mean": fuzzy-match against the pages listed in sitemap.xml ----
+    function norm(p) { return decodeSafe(p).toLowerCase().replace(/\.html?$/, '').replace(/\/+$/, '').replace(/^\/+/, ''); }
+    function lev(a, b) {
+      var m = a.length, n = b.length, d = [], i, j;
+      for (i = 0; i <= m; i++) { d[i] = [i]; }
+      for (j = 1; j <= n; j++) d[0][j] = j;
+      for (i = 1; i <= m; i++) for (j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      return d[m][n];
+    }
+    function sim(a, b) { var L = Math.max(a.length, b.length); return L ? 1 - lev(a, b) / L : 0; }
+    function tokens(s) { return s.split(/[^a-z0-9]+/).filter(Boolean); }
+
+    var common = {};   // words that appear in many page paths ("tools", "test") say nothing about what was meant
+
+    function score(want, cand) {
+      if (!want || !cand) return 0;
+      var wl = want.split('/').pop(), cl = cand.split('/').pop(), s = sim(wl, cl);   // last segment only: a shared folder like /tools/ shouldn't make everything look similar
+      if (wl.length >= 3 && (cl.indexOf(wl) === 0 || wl.indexOf(cl) === 0)) s = Math.max(s, 0.8);       // /tool -> tools, /subnet -> subnet-calc
+      else if (wl.length >= 4 && cl.indexOf(wl) >= 0) s = Math.max(s, 0.7);
+      var wt = tokens(want), ct = tokens(cand), hit = wt.filter(function (t) { return t.length > 2 && !common[t] && ct.some(function (c) { return !common[c] && (c.indexOf(t) === 0 || t.indexOf(c) === 0); }); }).length;
+      if (hit) s = Math.max(s, 0.55 + 0.1 * Math.min(hit, 3));
+      return s;
+    }
+
+    function pretty(path) {
+      var seg = path.replace(/\/+$/, '').split('/').pop();
+      if (!seg) return 'Home';
+      var ACRO = { jwt: 'JWT', json: 'JSON', url: 'URL', cps: 'CPS' };
+      return seg.replace(/\.html?$/, '').split(/[-_]+/).map(function (w) { return ACRO[w] || w.charAt(0).toUpperCase() + w.slice(1); }).join(' ');
+    }
+
+    fetch('/sitemap.xml').then(function (r) { return r.ok ? r.text() : Promise.reject(); }).then(function (xml) {
+      var want = norm(location.pathname);
+      if (!want) return;
+      var paths = [], re = /<loc>\s*([^<\s]+)\s*<\/loc>/g, m;
+      while ((m = re.exec(xml))) { try { var u = new URL(m[1]); paths.push(u.pathname); } catch (e) {} }
+      var df = {}; paths.forEach(function (p) { var seen = {}; tokens(norm(p)).forEach(function (t) { if (!seen[t]) { seen[t] = 1; df[t] = (df[t] || 0) + 1; } }); });
+      Object.keys(df).forEach(function (t) { if (df[t] > paths.length * 0.25) common[t] = true; });
+      var hits = paths.filter(function (p) { return p !== '/'; }).map(function (p) { return { p: p, s: score(want, norm(p)) }; })
+        .filter(function (x) { return x.s >= 0.55; }).sort(function (a, b) { return b.s - a.s; }).slice(0, 3);
+      if (!hits.length) return;
+      var list = document.getElementById('maybe-list');
+      hits.forEach(function (h) {
+        var a = document.createElement('a'); a.href = h.p;
+        var b = document.createElement('b'); b.textContent = pretty(h.p);
+        var s = document.createElement('span'); s.textContent = h.p;
+        a.appendChild(b); a.appendChild(s); list.appendChild(a);
+      });
+      document.getElementById('maybe').hidden = false;
+    }).catch(function () { /* suggestions are a bonus; the page works without them */ });
+  </script>
+</body>
+</html>
