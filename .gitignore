@@ -6,3 +6,6 @@
 *.GEDCOM
 family-history/private/
 family-history/*.ged
+
+__pycache__/
+*.pyc

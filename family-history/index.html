@@ -72,6 +72,8 @@
   }
   .pc.m { border-left-color: #7dd3fc; }
   .pc.f { border-left-color: #f9a8d4; }
+  .pc.lv { border-style: dashed; border-left-style: solid; border-left-color: #4b5563; color: var(--muted); }
+  .pc.lv .nm { font-weight: 500; font-style: italic; }
   .pc:hover { border-color: var(--accent); }
   .pc:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .pc.focus { border-color: var(--accent); background: rgba(110, 231, 183, .10); box-shadow: 0 0 0 3px rgba(110, 231, 183, .12); }
@@ -279,13 +281,13 @@
       L.cards.forEach(function (c) {
         var p = people[c.id], b = document.createElement('button');
         b.type = 'button';
-        b.className = 'pc ' + (p.x === 'M' ? 'm' : p.x === 'F' ? 'f' : 'u') + (c.role === 'focus' ? ' focus' : '');
+        b.className = 'pc ' + (p.x === 'M' ? 'm' : p.x === 'F' ? 'f' : 'u') + (p.living ? ' lv' : '') + (c.role === 'focus' ? ' focus' : '');
         b.style.left = (c.x - W / 2) + 'px'; b.style.top = (c.y - H / 2) + 'px';
         b.setAttribute('data-id', c.id);
         b.title = p.n;
         b.setAttribute('aria-label', p.n + (life(p) ? ', ' + life(p) : '') + (c.role === 'focus' ? ' (selected)' : '. Show this person'));
         var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = p.n; b.appendChild(nm);
-        var y = document.createElement('span'); y.className = 'yr'; y.textContent = life(p) || ' '; b.appendChild(y);
+        var y = document.createElement('span'); y.className = 'yr'; y.textContent = p.living ? 'Details private' : (life(p) || ' '); b.appendChild(y);
         if (c.badge) { var bd = document.createElement('span'); bd.className = 'bd'; bd.textContent = '↓ ' + c.badge; bd.title = c.badge + ' children'; b.appendChild(bd); }
         if (c.more) { var m = document.createElement('span'); m.className = 'more'; m.textContent = '▲ more'; m.title = 'More ancestors. Select to explore.'; b.appendChild(m); }
         canvas.appendChild(b);
@@ -304,7 +306,10 @@
       var bw = b.maxX - b.minX, bh = b.maxY - b.minY;
       var k = Math.min((vw - pad * 2) / bw, (vh - pad * 2) / bh, 1.15);
       if (k >= 0.42) { st.k = k; st.x = vw / 2 - k * (b.minX + bw / 2); st.y = vh / 2 - k * (b.minY + bh / 2); }
-      else { st.k = 0.55; st.x = vw / 2 - st.k * L.fx; st.y = vh / 2; }   // too big to fit legibly: centre on the person instead
+      else {   // too wide to fit legibly: keep text readable, centre on the person and keep every generation in view
+        st.k = 0.5; st.x = vw / 2 - st.k * L.fx;
+        st.y = st.k * bh <= vh - pad * 2 ? pad - st.k * b.minY : vh - pad - st.k * b.maxY;
+      }
       st.auto = true; applyT(anim);
     }
 
@@ -341,7 +346,7 @@
     function renderProfile(id) {
       var p = people[id], box = $('profile'); box.textContent = '';
       box.appendChild(el('h2', 'name', p.n));
-      box.appendChild(el('p', 'life', [life(p), ageText(p)].filter(Boolean).join('  |  ')));
+      box.appendChild(el('p', 'life', p.living ? 'Details of living people are not shown.' : [life(p), ageText(p)].filter(Boolean).join('  |  ')));
       var dl = el('dl', 'kv');
       fact(dl, 'Born', evText(p.b)); fact(dl, 'Died', evText(p.d)); fact(dl, 'Occupation', p.o);
       if (dl.children.length) box.appendChild(dl);
@@ -463,8 +468,8 @@
       if (meta.demo) $('banner').hidden = false;
       if (meta.title) $('title').textContent = meta.title;
       var span = meta.from && meta.to ? ', ' + meta.from + ' to ' + meta.to : '';
-      $('stats').textContent = ids.length + ' people' + span + (meta.privacy ? '. ' + meta.privacy + '.' : '');
-      index = ids.map(function (id) { return { id: id, k: norm(people[id].n), y: people[id].b && people[id].b.y }; });
+      $('stats').textContent = (meta.people || ids.filter(function (id) { return !people[id].living; }).length) + ' people' + span + (meta.privacy ? '. ' + meta.privacy + '.' : '');
+      index = ids.filter(function (id) { return !people[id].living; }).map(function (id) { return { id: id, k: norm(people[id].n), y: people[id].b && people[id].b.y }; });
       var g = parseInt(store.get('fh.gens'), 10);
       if (!(g >= 2 && g <= 5)) g = window.innerWidth < 700 ? 2 : 3;   // fewer generations by default on small screens
       st.gens = g; $('gens').value = String(g);

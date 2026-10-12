@@ -13,8 +13,8 @@ PRIVACY (this site and repo are public):
     more than --living-cutoff years ago (default 110). Anyone with no dates at all is treated
     as living. People marked private (RESN) are always dropped.
   * Only name, sex, birth/death/marriage dates and places, and occupation are kept. Notes are
-    left out unless --include-notes is given. Places are cut to their last three parts
-    (town, county, country) so street addresses never appear unless --keep-places is given.
+    left out unless --include-notes is given. House-numbered address parts are removed from
+    places and at most the last four parts are kept, unless --keep-places is given.
   * The report printed at the end contains COUNTS ONLY, never names.
 
 Never commit the .ged file itself (.gitignore blocks it).
@@ -110,6 +110,13 @@ def parse_name(node):
     else:
         given = given or n.value.strip()
         suffix = ""
+    # Genealogy sites use "Unknown" / "[Unknown]" as a placeholder surname or given name.
+    unk = re.compile(r"^\[?\s*(unknown|unk|\?+)\s*\]?$", re.I)
+    if unk.match(sur):
+        sur = ""
+        suffix = (suffix + " (surname unknown)").strip() if given and not unk.match(given) else suffix
+    if unk.match(given):
+        given = "Unknown" if not sur else ""
     full = " ".join(p for p in (given, sur, suffix) if p)
     return re.sub(r"\s+", " ", full), given, sur
 
@@ -158,11 +165,15 @@ def parse_date(raw):
 
 
 def trim_place(p, keep):
+    """Drop house-numbered address parts ("14 Mill Lane", "11") from the front and keep at most
+    the last four parts (town, county, country...). --keep-places leaves the text untouched."""
     p = re.sub(r"\s+", " ", (p or "").strip().strip(","))
     if keep or not p:
         return p
     parts = [x.strip() for x in p.split(",") if x.strip()]
-    return ", ".join(parts[-3:])
+    while len(parts) > 1 and re.match(r"^\d", parts[0]):
+        parts.pop(0)
+    return ", ".join(parts[-4:])
 
 
 def event(node, tag, keep_places):
@@ -192,6 +203,13 @@ def main():
     ap.add_argument("--title", default="Family History")
     ap.add_argument("--living-cutoff", type=int, default=110,
                     help="People with no death record born more recently than this many years ago are treated as living")
+    ap.add_argument("--include", action="append", default=[], metavar="ID",
+                    help="Also include this living person by GEDCOM id, with NAME ONLY (no dates, places or links). "
+                         "Use only for someone who has agreed, e.g. yourself.")
+    ap.add_argument("--link-living", action="store_true",
+                    help="Where a living person is the only link between two kept people (e.g. a parent between a "
+                         "deceased grandparent and an included grandchild), show a nameless \"Living\" placeholder "
+                         "so the tree stays connected. Nothing about them is written except that link.")
     ap.add_argument("--keep-places", action="store_true", help="Keep full place text (street addresses included)")
     ap.add_argument("--include-notes", action="store_true", help="Include notes (review them first)")
     a = ap.parse_args()
@@ -201,18 +219,58 @@ def main():
     fam = {clean_xref(r.xref): r for r in recs if r.tag == "FAM" and r.xref}
     this_year = datetime.date.today().year
 
-    people, stats = {}, {"total": len(indi), "deceased": 0, "living_or_unknown": 0, "private": 0}
+    include = {x.strip().strip("@") for x in a.include}
+
+    # Relationship maps from the raw file (used for inference and for linking placeholders).
+    kids_of, parents_of = {}, {}
+    for fid, fr in fam.items():
+        ps = [clean_xref(x.value.strip()) for t in ("HUSB", "WIFE") for x in fr.all(t)]
+        cs = [clean_xref(c.value.strip()) for c in fr.all("CHIL")]
+        for pp in ps:
+            for cc in cs:
+                kids_of.setdefault(pp, []).append(cc)
+                parents_of.setdefault(cc, []).append(pp)
+
+    def birth_year(rec):
+        return (event(rec, "BIRT", True) or {}).get("y")
+
+    def base_dead(rec):
+        by = birth_year(rec)
+        return bool(rec.get("DEAT") is not None or rec.get("BURI") is not None or rec.get("CREM") is not None
+                    or (by is not None and by <= this_year - a.living_cutoff))
+
+    # An undated person whose child was born long ago must be deceased too (a parent is at least ~15
+    # years older than their child), so infer that rather than leaving a hole in the tree.
+    inferred = set()
+    for pid, rec in indi.items():
+        if base_dead(rec) or pid in include:
+            continue
+        ys = [birth_year(indi[c]) for c in kids_of.get(pid, []) if c in indi and birth_year(indi[c])]
+        if ys and min(ys) <= this_year - a.living_cutoff + 15:
+            inferred.add(pid)
+    people, stats = {}, {"total": len(indi), "deceased": 0, "living_or_unknown": 0, "private": 0, "included": 0}
     for pid, r in indi.items():
+        if pid in include:
+            # Explicitly requested living person: name only. No dates, places or living relatives.
+            full, given, sur = parse_name(r)
+            p = {"n": full or "Unknown", "s": sur}
+            sex = (r.get("SEX").value.strip().upper()[:1] if r.get("SEX") else "")
+            if sex in ("M", "F"):
+                p["x"] = sex
+            famc = r.get("FAMC")
+            if famc:
+                p["famc"] = clean_xref(famc.value.strip())
+            p["fams"] = []
+            people[pid] = p
+            stats["included"] += 1
+            continue
         resn = r.get("RESN")
         if resn and resn.value.strip().lower() in ("privacy", "confidential", "locked"):
             stats["private"] += 1
             continue
-        birt, deat = r.get("BIRT"), r.get("DEAT")
         b = event(r, "BIRT", a.keep_places)
         d = event(r, "DEAT", a.keep_places)
-        has_death = deat is not None or r.get("BURI") is not None or r.get("CREM") is not None
-        by = (b or {}).get("y")
-        dead = has_death or (by is not None and by <= this_year - a.living_cutoff)
+        dead = base_dead(r) or pid in inferred
         if not dead:
             stats["living_or_unknown"] += 1
             continue
@@ -238,6 +296,22 @@ def main():
             p["famc"] = clean_xref(famc.value.strip())
         p["fams"] = [clean_xref(f.value.strip()) for f in r.all("FAMS")]
         people[pid] = p
+
+    # Optional nameless placeholders so a living person between two kept people doesn't cut the tree in two.
+    placeholders = {}
+    if a.link_living:
+        for pid, rec in indi.items():
+            if pid in people or (rec.get("RESN") and rec.get("RESN").value.strip().lower() in ("privacy", "confidential", "locked")):
+                continue
+            up = any(pp in people for pp in parents_of.get(pid, []))
+            down = any(cc in people for cc in kids_of.get(pid, []))
+            if up and down:
+                placeholders[pid] = {"n": "Living", "living": True}
+                famc = rec.get("FAMC")
+                if famc:
+                    placeholders[pid]["famc"] = clean_xref(famc.value.strip())
+                placeholders[pid]["fams"] = [clean_xref(f.value.strip()) for f in rec.all("FAMS")]
+        people.update(placeholders)
 
     families = {}
     for fid, r in fam.items():
@@ -267,7 +341,7 @@ def main():
     for pid, p in people.items():
         if p.get("famc") not in families or pid not in families[p["famc"]].get("c", []):
             p.pop("famc", None)
-        p["fams"] = [f for f in p["fams"] if f in families and pid in (families[f].get("h"), families[f].get("w"))]
+        p["fams"] = [f for f in p.get("fams", []) if f in families and pid in (families[f].get("h"), families[f].get("w"))]
         if not p["fams"]:
             del p["fams"]
 
@@ -308,7 +382,7 @@ def main():
             "updated": datetime.date.today().isoformat(),
             "privacy": "Deceased people only",
             "root": root,
-            "people": len(people),
+            "people": sum(1 for p in people.values() if not p.get("living")),
             "from": min(years) if years else None,
             "to": max(years) if years else None,
         },
@@ -322,6 +396,12 @@ def main():
     print(f"  Kept (deceased):                      {stats['deceased']}")
     print(f"  Dropped (living, or no dates at all): {stats['living_or_unknown']}")
     print(f"  Dropped (marked private):             {stats['private']}")
+    if inferred:
+        print(f"  Inferred deceased (undated, but a child born long ago): {len(inferred)}")
+    if placeholders:
+        print(f"  Nameless 'Living' placeholders (links only):          {len(placeholders)}")
+    if stats["included"]:
+        print(f"  Included by request (name only):      {stats['included']}")
     print(f"  Families written:                     {len(families)}")
     print(f"  Default focus person id:              {root}")
     print(f"Wrote {a.out}. Review it before committing; it will be public.")
