@@ -296,6 +296,33 @@ class PlexAPI {
     return c?.Metadata?.[0];
   }
 
+  async renamePlaylist(playlistRatingKey, title) {
+    await this.request("PUT", `/playlists/${playlistRatingKey}?title=${encodeURIComponent(title)}`);
+    this.invalidate("playlists");
+  }
+
+  async deletePlaylist(playlistRatingKey) {
+    await this.request("DELETE", `/playlists/${playlistRatingKey}`);
+    this.invalidate("playlists");
+  }
+
+  // playlistItemID (not ratingKey) identifies one entry, so a track that is in
+  // the playlist twice can be removed individually.
+  async removeFromPlaylist(playlistRatingKey, playlistItemID) {
+    await this.request("DELETE", `/playlists/${playlistRatingKey}/items/${playlistItemID}`);
+    this.invalidate("playlists");
+  }
+
+  // Creates a playlist from many tracks. Keys go in the URI, so they are sent in
+  // chunks to keep each request a sensible length.
+  async createPlaylistFromTracks(title, ratingKeys) {
+    const chunks = [];
+    for (let i = 0; i < ratingKeys.length; i += 50) chunks.push(ratingKeys.slice(i, i + 50));
+    const playlist = await this.createPlaylist(title, chunks[0].join(","));
+    for (const chunk of chunks.slice(1)) await this.addToPlaylist(playlist.ratingKey, chunk.join(","));
+    return playlist;
+  }
+
   async addToPlaylist(playlistRatingKey, ratingKey) {
     const machineId = await this.getMachineIdentifier();
     const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
@@ -611,7 +638,7 @@ function heroActions(getTracks) {
     <button class="btn-secondary" data-act="shuffle">${icon("shuffle")}<span>Shuffle</span></button>`;
   wrap.onclick = async (e) => {
     const btn = e.target.closest("button");
-    if (!btn) return;
+    if (!btn || !btn.dataset.act) return; // extra buttons (e.g. the playlist menu) handle themselves
     const shuffle = btn.dataset.act === "shuffle";
     try {
       const tracks = await getTracks();
@@ -660,24 +687,116 @@ async function showHome() {
   items.slice(0, 24).forEach(item => grid.appendChild(renderAlbumCard(item)));
 }
 
+// ---------- Artists / Albums: sort, filter, A–Z jump ----------
+
+const cmp = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+const nameKey = (it) => (it.titleSort || it.title || "");
+const BROWSE = {
+  artists: {
+    title: "Artists",
+    card: (a) => renderArtistCard(a),
+    sorts: [
+      { id: "name", label: "A–Z", alpha: true, key: nameKey, fn: (a, b) => cmp(nameKey(a), nameKey(b)) },
+      { id: "name-desc", label: "Z–A", alpha: true, key: nameKey, fn: (a, b) => cmp(nameKey(b), nameKey(a)) },
+      { id: "added", label: "Recently added", fn: (a, b) => (b.addedAt || 0) - (a.addedAt || 0) },
+    ],
+    prefs: { sort: "name", genre: "", q: "" },
+  },
+  albums: {
+    title: "Albums",
+    card: (a) => renderAlbumCard(a),
+    sorts: [
+      { id: "year-desc", label: "Year (newest)", fn: (a, b) => (b.originallyAvailableAt || String(b.year || "")).localeCompare(a.originallyAvailableAt || String(a.year || "")) },
+      { id: "year-asc", label: "Year (oldest)", fn: (a, b) => (a.originallyAvailableAt || String(a.year || "")).localeCompare(b.originallyAvailableAt || String(b.year || "")) },
+      { id: "added", label: "Recently added", fn: (a, b) => (b.addedAt || 0) - (a.addedAt || 0) },
+      { id: "name", label: "A–Z", alpha: true, key: nameKey, fn: (a, b) => cmp(nameKey(a), nameKey(b)) },
+      { id: "artist", label: "Artist A–Z", alpha: true, key: (a) => a.parentTitle || "", fn: (a, b) => cmp(a.parentTitle || "", b.parentTitle || "") || cmp(nameKey(a), nameKey(b)) },
+      { id: "played", label: "Recently played", fn: (a, b) => (b.lastViewedAt || 0) - (a.lastViewedAt || 0) },
+    ],
+    prefs: { sort: "year-desc", genre: "", q: "" },
+  },
+};
+
+function letterOf(text) {
+  const c = String(text).trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(c) ? c : "#";
+}
+
+// Sort / genre / text-filter bar, an A–Z jump strip (for name-based sorts) and
+// the card grid. Everything works on the already-loaded list, no extra requests.
+function renderBrowse(kind, items, container) {
+  const cfg = BROWSE[kind];
+  const prefs = cfg.prefs;
+  const genres = [...new Set(items.flatMap(it => (it.Genre || []).map(g => g.tag)))].sort(cmp);
+  container.innerHTML = `
+    <div class="section-heading">${cfg.title}</div>
+    <div class="browse-bar">
+      <input class="browse-filter" type="search" placeholder="Filter ${kind}…" aria-label="Filter ${kind}">
+      <select class="browse-sort" aria-label="Sort">${cfg.sorts.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join("")}</select>
+      ${genres.length ? `<select class="browse-genre" aria-label="Genre"><option value="">All genres</option>${genres.map(g => `<option>${esc(g)}</option>`).join("")}</select>` : ""}
+      <span class="browse-count"></span>
+    </div>
+    <div class="az-bar hidden"></div>
+    <div class="grid"></div>`;
+  const q = container.querySelector(".browse-filter");
+  const sortSel = container.querySelector(".browse-sort");
+  const genreSel = container.querySelector(".browse-genre");
+  const grid = container.querySelector(".grid");
+  const az = container.querySelector(".az-bar");
+  const count = container.querySelector(".browse-count");
+  q.value = prefs.q;
+  sortSel.value = prefs.sort;
+  if (genreSel) genreSel.value = genres.includes(prefs.genre) ? prefs.genre : "";
+
+  function apply() {
+    const sort = cfg.sorts.find(s => s.id === prefs.sort) || cfg.sorts[0];
+    const needle = prefs.q.trim().toLowerCase();
+    const list = items
+      .filter(it => !needle || `${it.title} ${it.parentTitle || ""}`.toLowerCase().includes(needle))
+      .filter(it => !prefs.genre || (it.Genre || []).some(g => g.tag === prefs.genre))
+      .sort(sort.fn);
+    grid.innerHTML = "";
+    const present = new Set();
+    list.forEach((it) => {
+      const card = cfg.card(it);
+      if (sort.alpha) { const L = letterOf(sort.key(it)); card.dataset.letter = L; present.add(L); }
+      grid.appendChild(card);
+    });
+    count.textContent = list.length === items.length ? `${items.length}` : `${list.length} of ${items.length}`;
+    if (!list.length) grid.innerHTML = `<p style="color:var(--text-dim)">Nothing matches.</p>`;
+    // A–Z strip only makes sense when the order is alphabetical
+    az.classList.toggle("hidden", !sort.alpha || !list.length);
+    az.innerHTML = "";
+    if (sort.alpha) {
+      const letters = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+      letters.forEach((L) => {
+        const b = document.createElement("button");
+        b.textContent = L;
+        b.disabled = !present.has(L);
+        b.onclick = () => grid.querySelector(`[data-letter="${L}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+        az.appendChild(b);
+      });
+    }
+  }
+  let t;
+  q.oninput = () => { clearTimeout(t); t = setTimeout(() => { prefs.q = q.value; apply(); }, 150); };
+  sortSel.onchange = () => { prefs.sort = sortSel.value; apply(); };
+  if (genreSel) genreSel.onchange = () => { prefs.genre = genreSel.value; apply(); };
+  apply();
+}
+
 async function showArtists() {
   switchView("artists");
   const container = el("view-artists");
-  container.innerHTML = `<div class="section-heading">Artists</div><div class="grid" id="artists-grid"></div>`;
-  const grid = el("artists-grid");
-  const artists = await api.getArtists(musicSectionKey);
-  artists
-    .sort((a, b) => a.titleSort?.localeCompare(b.titleSort) ?? a.title.localeCompare(b.title))
-    .forEach(a => grid.appendChild(renderArtistCard(a)));
+  container.innerHTML = `<div class="section-heading">Artists</div><p style="color:var(--text-dim)">Loading…</p>`;
+  renderBrowse("artists", await api.getArtists(musicSectionKey), container);
 }
 
 async function showAlbums() {
   switchView("albums");
   const container = el("view-albums");
-  container.innerHTML = `<div class="section-heading">Albums</div><div class="grid" id="albums-grid"></div>`;
-  const grid = el("albums-grid");
-  const albums = (await api.getAllAlbums(musicSectionKey)).slice().sort((a, b) => (b.originallyAvailableAt || "").localeCompare(a.originallyAvailableAt || ""));
-  albums.forEach(al => grid.appendChild(renderAlbumCard(al)));
+  container.innerHTML = `<div class="section-heading">Albums</div><p style="color:var(--text-dim)">Loading…</p>`;
+  renderBrowse("albums", await api.getAllAlbums(musicSectionKey), container);
 }
 
 async function showArtist(artist) {
@@ -756,31 +875,107 @@ async function showPlaylistDetail(playlist) {
   const container = el("view-playlist-detail");
   container.innerHTML = `
     <button class="back-btn" id="playlist-back">&larr; Back</button>
-    <div class="section-heading">${esc(playlist.title)}</div>
+    <div class="section-heading" id="playlist-title">${esc(playlist.title)}</div>
     <div id="playlist-actions"></div>
     <div id="playlist-track-list"></div>
   `;
   el("playlist-back").onclick = () => showPlaylists();
-  el("playlist-actions").appendChild(heroActions(() => api.getPlaylistItems(playlist.ratingKey)));
+  const actions = heroActions(() => api.getPlaylistItems(playlist.ratingKey));
+  const more = document.createElement("button");
+  more.className = "btn-secondary btn-icon";
+  more.title = "Playlist options";
+  more.setAttribute("aria-label", "Playlist options");
+  more.setAttribute("aria-haspopup", "menu");
+  more.innerHTML = icon("more");
+  more.onclick = () => showMenu(more, [
+    { label: "Rename…", icon: "edit", onClick: () => renamePlaylist(playlist) },
+    { label: "Delete playlist…", icon: "trash", onClick: () => deletePlaylist(playlist) },
+  ]);
+  actions.appendChild(more);
+  el("playlist-actions").appendChild(actions);
 
   const tracks = await api.getPlaylistItems(playlist.ratingKey);
   const list = el("playlist-track-list");
-  tracks.forEach((track, i) => {
+  const renumber = () => list.querySelectorAll(".track-row .idx").forEach((n, i) => { n.textContent = i + 1; });
+  tracks.forEach((track) => {
     const row = document.createElement("div");
     row.className = "track-row";
     row.dataset.ratingKey = track.ratingKey;
     row.innerHTML = `
-      <div class="idx">${i + 1}</div>
+      <div class="idx">${list.children.length + 1}</div>
       <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
 ${TRACK_ACTIONS}
     `;
-    row.onclick = () => playQueue(tracks, i);
-    wireAddToQueueButton(row, track);
-    wireAddToPlaylistButton(row, track);
+    // indexOf (not a captured index) so it stays right after tracks are removed
+    row.onclick = () => playQueue(tracks, tracks.indexOf(track));
+    wireAddToQueueButton(row, track, {
+      onRemove: async () => {
+        try {
+          await api.removeFromPlaylist(playlist.ratingKey, track.playlistItemID);
+          tracks.splice(tracks.indexOf(track), 1);
+          row.remove();
+          renumber();
+          showToast(`Removed "${track.title}" from ${playlist.title}`);
+        } catch (e) {
+          showToast("Couldn't remove track");
+        }
+      },
+    });
     wireFavoriteButton(row, track);
     list.appendChild(row);
   });
+  if (!tracks.length) list.innerHTML = `<p style="color:var(--text-dim)">This playlist is empty.</p>`;
+}
+
+async function renamePlaylist(playlist) {
+  const name = await showDialog({ title: "Rename playlist", input: true, value: playlist.title, confirmLabel: "Rename" });
+  if (!name || name === playlist.title) return;
+  try {
+    await api.renamePlaylist(playlist.ratingKey, name);
+    playlist.title = name;
+    const h = el("playlist-title");
+    if (h) h.textContent = name;
+    showToast("Playlist renamed");
+  } catch (e) {
+    showToast("Couldn't rename playlist");
+  }
+}
+
+async function deletePlaylist(playlist) {
+  const ok = await showDialog({
+    title: "Delete playlist?",
+    message: `"${playlist.title}" will be deleted from Plex. The tracks in it stay in your library.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api.deletePlaylist(playlist.ratingKey);
+    showToast("Playlist deleted");
+    showPlaylists();
+  } catch (e) {
+    showToast("Couldn't delete playlist");
+  }
+}
+
+async function saveQueueAsPlaylist() {
+  const keys = [...new Set(order.map(i => queue[i]?.ratingKey).filter(Boolean))];
+  if (!keys.length) return showToast("The queue is empty");
+  const name = await showDialog({
+    title: "Save queue as playlist",
+    message: `${keys.length} track${keys.length === 1 ? "" : "s"}`,
+    input: true,
+    value: "My queue",
+    confirmLabel: "Save",
+  });
+  if (!name) return;
+  try {
+    await api.createPlaylistFromTracks(name, keys);
+    showToast(`Saved playlist "${name}"`);
+  } catch (e) {
+    showToast("Couldn't save playlist");
+  }
 }
 
 function renderSimpleRow(title, sub, onClick) {
@@ -1257,6 +1452,74 @@ function playNext(track) {
   queueChanged();
 }
 
+// ---------- Simple dialog (rename / delete / name a playlist) ----------
+// Resolves to the entered text (input dialogs), true (confirm dialogs) or null.
+
+function showDialog(opts) {
+  return new Promise((resolve) => {
+    const d = el("dialog"), bd = el("dialog-backdrop"), form = el("dialog-form"), input = el("dialog-input");
+    el("dialog-title").textContent = opts.title;
+    const msg = el("dialog-message");
+    msg.textContent = opts.message || "";
+    msg.classList.toggle("hidden", !opts.message);
+    input.classList.toggle("hidden", !opts.input);
+    input.value = opts.value || "";
+    const ok = el("dialog-ok");
+    ok.textContent = opts.confirmLabel || "OK";
+    ok.classList.toggle("danger", !!opts.danger);
+    const done = (v) => {
+      d.classList.add("hidden");
+      bd.classList.add("hidden");
+      form.onsubmit = null;
+      el("dialog-cancel").onclick = null;
+      bd.onclick = null;
+      document.removeEventListener("keydown", onKey, true);
+      resolve(v);
+    };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); done(null); } };
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      if (opts.input) { const v = input.value.trim(); if (!v) return; done(v); } else done(true);
+    };
+    el("dialog-cancel").onclick = () => done(null);
+    bd.onclick = () => done(null);
+    document.addEventListener("keydown", onKey, true);
+    bd.classList.remove("hidden");
+    d.classList.remove("hidden");
+    (opts.input ? input : ok).focus();
+    if (opts.input) input.select();
+  });
+}
+
+// ---------- Go to album / artist ----------
+
+function goToAlbum(track) {
+  if (!track.parentRatingKey) return showToast("Album not available");
+  closeNowPlayingFull();
+  showAlbum({ ratingKey: track.parentRatingKey, title: track.parentTitle, parentTitle: track.grandparentTitle, thumb: track.parentThumb, year: track.parentYear });
+}
+
+function goToArtist(track) {
+  if (!track.grandparentRatingKey) return showToast("Artist not available");
+  closeNowPlayingFull();
+  showArtist({ ratingKey: track.grandparentRatingKey, title: track.grandparentTitle, thumb: track.grandparentThumb });
+}
+
+// Menu entries shared by the row menu and the full-screen player's menu.
+function trackMenuItems(track, { onRemove } = {}) {
+  const items = [
+    { label: "Play next", icon: "play-next", onClick: () => playNext(track) },
+    { label: "Add to queue", icon: "plus", onClick: () => addToQueue(track) },
+    { label: "Add to playlist…", icon: "playlist-add", onClick: () => openPlaylistPicker(track) },
+    { label: "Start radio", icon: "radio", onClick: () => startTrackRadio(track) },
+  ];
+  if (track.parentRatingKey || track.grandparentRatingKey) items.push({ divider: true });
+  if (track.parentRatingKey) items.push({ label: "Go to album", icon: "album", onClick: () => goToAlbum(track) });
+  if (track.grandparentRatingKey) items.push({ label: "Go to artist", icon: "artist", onClick: () => goToArtist(track) });
+  if (onRemove) items.push({ divider: true }, { label: "Remove from playlist", icon: "x", onClick: onRemove });
+  return items;
+}
+
 // ---------- Popup menu (row actions, sleep timer) ----------
 
 let menuEl = null;
@@ -1431,23 +1694,18 @@ function openSleepMenu() {
   showMenu(el("fs-sleep-toggle"), items);
 }
 
-function wireTrackMenu(row, track) {
+function wireTrackMenu(row, track, opts) {
   const btn = row.querySelector(".more-btn");
   if (!btn) return;
   btn.onclick = (e) => {
     e.stopPropagation();
-    showMenu(btn, [
-      { label: "Play next", icon: "play-next", onClick: () => playNext(track) },
-      { label: "Add to queue", icon: "plus", onClick: () => addToQueue(track) },
-      { label: "Add to playlist…", icon: "playlist-add", onClick: () => openPlaylistPicker(track) },
-      { label: "Start radio", icon: "radio", onClick: () => startTrackRadio(track) },
-    ]);
+    showMenu(btn, trackMenuItems(track, opts));
   };
 }
 
 // Rows now have a single "more" menu (play next / add to queue / add to
 // playlist / radio); the old per-row queue + playlist buttons are gone.
-function wireAddToQueueButton(row, track) { wireTrackMenu(row, track); }
+function wireAddToQueueButton(row, track, opts) { wireTrackMenu(row, track, opts); }
 function wireAddToPlaylistButton() { /* handled by the row menu */ }
 
 // ---------- Favorites ----------
@@ -1667,6 +1925,12 @@ function renderQueueView() {
     list.innerHTML = `<p style="color:var(--text-dim); text-align:center; padding-top:1em;">Queue is empty.</p>`;
     return;
   }
+
+  const bar = document.createElement("div");
+  bar.className = "queue-toolbar";
+  bar.innerHTML = `<button class="btn-secondary btn-small">${icon("playlist-add")}<span>Save as playlist</span></button>`;
+  bar.querySelector("button").onclick = saveQueueAsPlaylist;
+  list.appendChild(bar);
 
   let sectionShown = { played: false, upNext: false };
   order.forEach((queueIdx, pos) => {
@@ -2183,6 +2447,10 @@ el("fs-seek").oninput = (e) => {
 el("fs-collapse").onclick = closeNowPlayingFull;
 el("fs-lyrics-toggle").onclick = () => showFsView(fsViewMode === "lyrics" ? "now-playing" : "lyrics");
 el("fs-sleep-toggle").onclick = openSleepMenu;
+el("fs-more-toggle").onclick = () => {
+  const track = queue[order[orderPos]];
+  if (track) showMenu(el("fs-more-toggle"), trackMenuItems(track));
+};
 el("fs-queue-toggle").onclick = () => showFsView(fsViewMode === "queue" ? "now-playing" : "queue");
 el("fs-favorite-toggle").onclick = () => {
   const track = queue[order[orderPos]];
