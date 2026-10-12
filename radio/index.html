@@ -6,8 +6,10 @@
 <title>radio — reecehaigh.com</title>
 <link rel="stylesheet" href="style.css">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0d0d0e">
-<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#09090b">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -15,8 +17,51 @@
 </head>
 <body>
 
+<!-- Icon sprite. Stroke icons inherit stroke/fill from .ico in style.css; the
+     solid ones (play/pause/skip/star-fill) set fill="currentColor" themselves. -->
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd166"/><stop offset=".55" stop-color="#f6a609"/><stop offset="1" stop-color="#e2650a"/>
+    </linearGradient>
+  </defs>
+  <symbol id="i-logo" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="30" fill="url(#logo-g)"/>
+    <path d="M26 21.5v21c0 1.6 1.7 2.5 3 1.7l16.5-10.5c1.2-.8 1.2-2.6 0-3.4L29 19.8c-1.3-.8-3 .1-3 1.7z" fill="#1a1100"/>
+  </symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.6v12.8c0 .8.9 1.3 1.6.8l10-6.4c.6-.4.6-1.2 0-1.6l-10-6.4C8.9 4.3 8 4.8 8 5.6z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4.2" height="14" rx="1.3" fill="currentColor" stroke="none"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.3" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6.2v11.6c0 .8-.9 1.2-1.5.8l-8-5.8c-.5-.4-.5-1.2 0-1.6l8-5.8c.6-.4 1.5 0 1.5.8z" fill="currentColor" stroke="none"/><rect x="5" y="5" width="2.4" height="14" rx="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6.2v11.6c0 .8.9 1.2 1.5.8l8-5.8c.5-.4.5-1.2 0-1.6l-8-5.8C6.9 5 6 5.4 6 6.2z" fill="currentColor" stroke="none"/><rect x="16.6" y="5" width="2.4" height="14" rx="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22M18 2l4 4-4 4M2 6h1.9c1.5 0 2.9.9 3.6 2.2M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8M18 14l4 4-4 4"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5M19.1 4.9C23 8.8 23 15.1 19.1 19"/></symbol>
+  <symbol id="i-crossfade" viewBox="0 0 24 24"><circle cx="8.8" cy="12" r="5.6"/><circle cx="15.2" cy="12" r="5.6"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-playlist-add" viewBox="0 0 24 24"><path d="M3 6h12M3 12h8M3 18h8M17 14v6M14 17h6"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2.6 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9L12 2.6z"/></symbol>
+  <symbol id="i-star-fill" viewBox="0 0 24 24"><path d="m12 2.6 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9L12 2.6z" fill="currentColor"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M21 15V6M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM12 12H3M16 6H3M12 18H3"/></symbol>
+  <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10.5 9-7.5 9 7.5M5 9.5V20h5v-6h4v6h5V9.5"/></symbol>
+  <symbol id="i-artist" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M20 21v-1.5a5 5 0 0 0-5-5H9a5 5 0 0 0-5 5V21"/></symbol>
+  <symbol id="i-album" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+</svg>
+
 <div id="login-screen" class="screen">
   <div class="login-box">
+    <svg class="login-logo" aria-hidden="true"><use href="#i-logo"/></svg>
     <h1>radio</h1>
     <p>Sign in with Plex to play your music library.</p>
     <button id="login-btn">Sign in with Plex</button>
@@ -27,28 +72,32 @@
 
 <div id="app" class="screen hidden">
   <header id="mobile-bar">
-    <button id="menu-toggle" aria-label="Menu">☰</button>
+    <button id="menu-toggle" aria-label="Menu"><svg class="ico"><use href="#i-menu"/></svg></button>
+    <svg class="logo-mark" aria-hidden="true"><use href="#i-logo"/></svg>
     <h1>radio</h1>
   </header>
   <div id="sidebar-backdrop" class="hidden"></div>
   <aside id="sidebar">
-    <h1 id="sidebar-logo">radio</h1>
+    <div class="brand">
+      <svg class="logo-mark" aria-hidden="true"><use href="#i-logo"/></svg>
+      <h1 id="sidebar-logo">radio</h1>
+    </div>
     <nav>
-      <button class="nav-btn active" data-view="home">Home</button>
-      <button class="nav-btn" data-view="artists">Artists</button>
-      <button class="nav-btn" data-view="albums">Albums</button>
-      <button class="nav-btn" data-view="playlists">Playlists</button>
-      <button class="nav-btn" data-view="favorites">Favorites</button>
-      <button class="nav-btn" data-view="library">Library</button>
+      <button class="nav-btn active" data-view="home"><svg class="ico"><use href="#i-home"/></svg><span>Home</span></button>
+      <button class="nav-btn" data-view="artists"><svg class="ico"><use href="#i-artist"/></svg><span>Artists</span></button>
+      <button class="nav-btn" data-view="albums"><svg class="ico"><use href="#i-album"/></svg><span>Albums</span></button>
+      <button class="nav-btn" data-view="playlists"><svg class="ico"><use href="#i-queue"/></svg><span>Playlists</span></button>
+      <button class="nav-btn" data-view="favorites"><svg class="ico"><use href="#i-star"/></svg><span>Favorites</span></button>
+      <button class="nav-btn" data-view="library"><svg class="ico"><use href="#i-library"/></svg><span>Library</span></button>
     </nav>
     <div class="search-box">
-      <input id="search-input" type="search" placeholder="Search library…">
+      <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search-input" type="search" placeholder="Search library…" aria-label="Search library">
     </div>
-    <select id="library-select" class="library-select"></select>
+    <select id="library-select" class="library-select" aria-label="Music library"></select>
     <div id="server-info" class="server-info"></div>
-    <button id="logout-btn">Sign out</button>
+    <button id="logout-btn"><svg class="ico"><use href="#i-logout"/></svg><span>Sign out</span></button>
   </aside>
-
   <main id="content">
     <div id="view-home" class="view"></div>
     <div id="view-artists" class="view hidden"></div>
@@ -74,34 +123,34 @@
       </div>
     </div>
     <div class="np-controls">
-      <button id="np-shuffle" class="control-toggle" title="Shuffle">🔀</button>
-      <button id="np-repeat" class="control-toggle" title="Repeat">🔁</button>
-      <button id="np-prev" title="Previous">⏮</button>
-      <button id="np-play" title="Play/Pause">▶</button>
-      <button id="np-next" title="Next">⏭</button>
-      <button id="np-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
-      <button id="np-crossfade" class="control-toggle" title="Crossfade — blend into the next track">🎚</button>
+      <button id="np-shuffle" class="control-toggle" title="Shuffle" aria-label="Shuffle"><svg class="ico"><use href="#i-shuffle"/></svg></button>
+      <button id="np-repeat" class="control-toggle" title="Repeat" aria-label="Repeat"><svg class="ico"><use href="#i-repeat"/></svg></button>
+      <button id="np-prev" title="Previous" aria-label="Previous"><svg class="ico"><use href="#i-prev"/></svg></button>
+      <button id="np-play" class="play-btn" title="Play/Pause" aria-label="Play"><svg class="ico"><use href="#i-play"/></svg></button>
+      <button id="np-next" title="Next" aria-label="Next"><svg class="ico"><use href="#i-next"/></svg></button>
+      <button id="np-radio" class="control-toggle" title="Radio — keep playing similar tracks" aria-label="Radio mode"><svg class="ico"><use href="#i-radio"/></svg></button>
+      <button id="np-crossfade" class="control-toggle" title="Crossfade — blend into the next track" aria-label="Crossfade"><svg class="ico"><use href="#i-crossfade"/></svg></button>
     </div>
     <div class="np-progress">
       <span id="np-time-current">0:00</span>
-      <input id="np-seek" type="range" min="0" max="100" value="0">
+      <input id="np-seek" type="range" min="0" max="100" value="0" aria-label="Seek">
       <span id="np-time-total">0:00</span>
     </div>
     <div class="np-volume">
-      <span>🔊</span>
-      <input id="np-volume" type="range" min="0" max="100" value="100">
+      <svg class="ico" aria-hidden="true"><use href="#i-volume"/></svg>
+      <input id="np-volume" type="range" min="0" max="100" value="100" aria-label="Volume">
     </div>
   </footer>
 </div>
 
 <div id="now-playing-full" class="now-playing-full hidden">
   <div class="fs-header">
-    <button id="fs-collapse" aria-label="Collapse">⌄</button>
+    <button id="fs-collapse" aria-label="Collapse"><svg class="ico"><use href="#i-chevron-down"/></svg></button>
     <div class="fs-header-title">Now Playing</div>
     <div class="fs-header-actions">
-      <button id="fs-favorite-toggle" class="fs-header-btn" title="Favorite this track">☆</button>
-      <button id="fs-lyrics-toggle" class="fs-header-btn hidden" title="Lyrics">Lyrics</button>
-      <button id="fs-queue-toggle" class="fs-header-btn" title="Queue">Queue</button>
+      <button id="fs-favorite-toggle" class="fs-header-btn" title="Favorite this track" aria-label="Favorite this track"><svg class="ico"><use href="#i-star"/></svg></button>
+      <button id="fs-lyrics-toggle" class="fs-header-btn hidden" title="Lyrics" aria-label="Lyrics"><svg class="ico"><use href="#i-lyrics"/></svg></button>
+      <button id="fs-queue-toggle" class="fs-header-btn" title="Queue" aria-label="Queue"><svg class="ico"><use href="#i-queue"/></svg></button>
     </div>
   </div>
   <div id="fs-main-view">
@@ -120,20 +169,20 @@
     <div id="fs-queue-list"></div>
   </div>
   <div class="fs-progress">
-    <input id="fs-seek" type="range" min="0" max="100" value="0">
+    <input id="fs-seek" type="range" min="0" max="100" value="0" aria-label="Seek">
     <div class="fs-times">
       <span id="fs-time-current">0:00</span>
       <span id="fs-time-total">0:00</span>
     </div>
   </div>
   <div class="fs-controls">
-    <button id="fs-shuffle" class="control-toggle" title="Shuffle">🔀</button>
-    <button id="fs-repeat" class="control-toggle" title="Repeat">🔁</button>
-    <button id="fs-prev" title="Previous">⏮</button>
-    <button id="fs-play" title="Play/Pause">▶</button>
-    <button id="fs-next" title="Next">⏭</button>
-    <button id="fs-radio" class="control-toggle" title="Radio — keep playing similar tracks">📡</button>
-    <button id="fs-crossfade" class="control-toggle" title="Crossfade — blend into the next track">🎚</button>
+      <button id="fs-shuffle" class="control-toggle" title="Shuffle" aria-label="Shuffle"><svg class="ico"><use href="#i-shuffle"/></svg></button>
+      <button id="fs-repeat" class="control-toggle" title="Repeat" aria-label="Repeat"><svg class="ico"><use href="#i-repeat"/></svg></button>
+      <button id="fs-prev" title="Previous" aria-label="Previous"><svg class="ico"><use href="#i-prev"/></svg></button>
+      <button id="fs-play" class="play-btn" title="Play/Pause" aria-label="Play"><svg class="ico"><use href="#i-play"/></svg></button>
+      <button id="fs-next" title="Next" aria-label="Next"><svg class="ico"><use href="#i-next"/></svg></button>
+      <button id="fs-radio" class="control-toggle" title="Radio — keep playing similar tracks" aria-label="Radio mode"><svg class="ico"><use href="#i-radio"/></svg></button>
+      <button id="fs-crossfade" class="control-toggle" title="Crossfade — blend into the next track" aria-label="Crossfade"><svg class="ico"><use href="#i-crossfade"/></svg></button>
   </div>
 </div>
 

@@ -436,6 +436,23 @@ const LIBRARY_CATEGORIES = [
 
 const el = (id) => document.getElementById(id);
 
+// Inline SVG icons from the sprite at the top of index.html (stroke follows
+// currentColor, so colour/active state is plain CSS).
+const icon = (name) => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const TRACK_ACTIONS = `
+      <button class="add-to-queue-btn" title="Add to queue" aria-label="Add to queue">${icon("plus")}</button>
+      <button class="add-to-playlist-btn" title="Add to playlist" aria-label="Add to playlist">${icon("playlist-add")}</button>
+      <button class="favorite-btn" title="Favorite" aria-label="Favorite">${icon("star")}</button>`;
+
+// Paints the filled part of a range slider (see the --pct rule in style.css).
+function paintRange(input) {
+  const max = parseFloat(input.max) || 100;
+  input.style.setProperty("--pct", `${(input.value / max) * 100}%`);
+}
+document.addEventListener("input", (e) => {
+  if (e.target.type === "range") paintRange(e.target);
+});
+
 // Plex metadata (titles, tags, search text) comes from file tags and is
 // interpolated into innerHTML templates throughout, so it must be escaped.
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
@@ -590,9 +607,7 @@ async function showAlbum(album) {
       <div class="idx">${track.index || i + 1}</div>
       <div class="title">${esc(track.title)}</div>
       <div class="dur">${fmtDuration(track.duration)}</div>
-      <button class="add-to-queue-btn" title="Add to queue">+</button>
-      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
-      <button class="favorite-btn" title="Favorite">☆</button>
+${TRACK_ACTIONS}
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
@@ -637,9 +652,7 @@ async function showPlaylistDetail(playlist) {
       <div class="idx">${i + 1}</div>
       <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
-      <button class="add-to-queue-btn" title="Add to queue">+</button>
-      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
-      <button class="favorite-btn" title="Favorite">☆</button>
+${TRACK_ACTIONS}
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
@@ -657,7 +670,7 @@ function renderSimpleRow(title, sub, onClick) {
       <div class="row-title">${esc(title)}</div>
       ${sub ? `<div class="row-sub">${esc(sub)}</div>` : ""}
     </div>
-    <div class="row-chevron">&rsaquo;</div>
+    <div class="row-chevron">${icon("chevron-right")}</div>
   `;
   row.onclick = onClick;
   return row;
@@ -742,9 +755,7 @@ async function showAllTracks() {
       <div class="idx">♪</div>
       <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
-      <button class="add-to-queue-btn" title="Add to queue">+</button>
-      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
-      <button class="favorite-btn" title="Favorite">☆</button>
+${TRACK_ACTIONS}
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
@@ -784,9 +795,7 @@ async function showFolder() {
         <div class="idx">♪</div>
         <div class="title">${esc(item.title)}</div>
         <div class="dur">${fmtDuration(item.duration)}</div>
-        <button class="add-to-queue-btn" title="Add to queue">+</button>
-        <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
-        <button class="favorite-btn" title="Favorite">☆</button>
+${TRACK_ACTIONS}
       `;
       row.onclick = () => playQueue(tracks, idx);
       wireAddToQueueButton(row, item);
@@ -820,9 +829,7 @@ async function showSearchResults(query) {
       <div class="idx">♪</div>
       <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
-      <button class="add-to-queue-btn" title="Add to queue">+</button>
-      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
-      <button class="favorite-btn" title="Favorite">☆</button>
+${TRACK_ACTIONS}
     `;
     row.onclick = () => playQueue(results, i);
     wireAddToQueueButton(row, track);
@@ -883,9 +890,11 @@ function highlightPlayingRow(ratingKey) {
 }
 
 function setPlayIcon(isPlaying) {
-  const icon = isPlaying ? "⏸" : "▶";
-  el("np-play").textContent = icon;
-  el("fs-play").textContent = icon;
+  const glyph = icon(isPlaying ? "pause" : "play");
+  el("np-play").innerHTML = glyph;
+  el("fs-play").innerHTML = glyph;
+  el("np-play").setAttribute("aria-label", isPlaying ? "Pause" : "Play");
+  el("fs-play").setAttribute("aria-label", isPlaying ? "Pause" : "Play");
 }
 
 function syncNowPlayingUI(track) {
@@ -900,6 +909,7 @@ function syncNowPlayingUI(track) {
   el("fs-title").textContent = track.title;
   el("fs-artist").textContent = track.parentTitle ? `${artist} — ${track.parentTitle}` : artist;
   el("fs-art").src = artUrlLarge;
+  el("now-playing-full").style.setProperty("--fs-art", `url("${artUrlLarge}")`);
 
   setPlayIcon(true);
   updateMediaSessionMetadata(track, artUrlLarge);
@@ -1036,7 +1046,7 @@ function wireFavoriteButton(row, track) {
 
 function paintFavoriteButton(btn, track) {
   const fav = isFavorited(track);
-  btn.textContent = fav ? "★" : "☆";
+  btn.innerHTML = icon(fav ? "star-fill" : "star");
   btn.classList.toggle("active", fav);
 }
 
@@ -1059,7 +1069,7 @@ async function toggleFavorite(track, btn) {
 function paintFsFavoriteToggle(track) {
   const btn = el("fs-favorite-toggle");
   const fav = isFavorited(track);
-  btn.textContent = fav ? "★" : "☆";
+  btn.innerHTML = icon(fav ? "star-fill" : "star");
   btn.classList.toggle("active", fav);
 }
 
@@ -1081,9 +1091,7 @@ async function showFavorites() {
       <div class="idx">♪</div>
       <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
-      <button class="add-to-queue-btn" title="Add to queue">+</button>
-      <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
-      <button class="favorite-btn" title="Favorite">☆</button>
+${TRACK_ACTIONS}
     `;
     row.onclick = () => playQueue(tracks, i);
     wireAddToQueueButton(row, track);
@@ -1221,7 +1229,7 @@ function renderQueueView() {
         <div class="queue-row-sub">${esc(track.grandparentTitle)}</div>
       </div>
       <div class="queue-row-actions">
-        ${canEdit ? `<button class="q-up" title="Move up">▲</button><button class="q-down" title="Move down">▼</button><button class="q-remove" title="Remove">✕</button>` : ""}
+        ${canEdit ? `<button class="q-up" title="Move up" aria-label="Move up">${icon("arrow-up")}</button><button class="q-down" title="Move down" aria-label="Move down">${icon("arrow-down")}</button><button class="q-remove" title="Remove" aria-label="Remove">${icon("x")}</button>` : ""}
       </div>
     `;
     row.querySelector(".queue-row-main").onclick = () => jumpToQueuePosition(pos);
@@ -1491,6 +1499,8 @@ function onActiveEnded() {
   const pct = (audio.currentTime / audio.duration) * 100;
   el("np-seek").value = pct;
   el("fs-seek").value = pct;
+  paintRange(el("np-seek"));
+  paintRange(el("fs-seek"));
   el("np-time-current").textContent = formatTime(audio.currentTime);
   el("np-time-total").textContent = formatTime(audio.duration);
   el("fs-time-current").textContent = formatTime(audio.currentTime);
@@ -1571,9 +1581,9 @@ async function advance(auto) {
       order = order.concat(newIndices);
       orderPos++;
       playCurrent();
-      showToast("📡 Radio: playing similar tracks");
+      showToast("Radio: playing similar tracks");
     } else {
-      showToast("📡 Radio ran out of tracks to suggest");
+      showToast("Radio ran out of tracks to suggest");
       setPlayIcon(false);
       if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
     }
@@ -1627,7 +1637,7 @@ function toggleRadio() {
   radioOn = !radioOn;
   store.radioMode = radioOn;
   updateShuffleRepeatUI();
-  if (radioOn) showToast("📡 Radio mode on — keeps playing similar tracks");
+  if (radioOn) showToast("Radio mode on — keeps playing similar tracks");
 }
 
 function toggleCrossfade() {
@@ -1635,7 +1645,7 @@ function toggleCrossfade() {
   crossfadeOn = !crossfadeOn;
   store.crossfade = crossfadeOn;
   updateShuffleRepeatUI();
-  showToast(crossfadeOn ? "🎚 Crossfade on" : "🎚 Crossfade off");
+  showToast(crossfadeOn ? "Crossfade on" : "Crossfade off");
 }
 
 function updateShuffleRepeatUI() {
@@ -1666,8 +1676,10 @@ function setVolume(v) {
   store.volume = userVolume;
   audio.volume = userVolume;
   el("np-volume").value = userVolume * 100;
+  paintRange(el("np-volume"));
 }
 el("np-volume").value = userVolume * 100;
+paintRange(el("np-volume"));
 el("np-volume").oninput = (e) => setVolume(e.target.value / 100);
 
 // Tapping anywhere on the mini-player opens the full-screen view, except the
@@ -1765,7 +1777,7 @@ function handleLogoTap() {
   if (logoTapCount >= 7) {
     logoTapCount = 0;
     document.body.classList.add("disco");
-    showToast("🕺 disco mode activated", 4000);
+    showToast("disco mode activated", 4000);
     setTimeout(() => document.body.classList.remove("disco"), 4000);
   }
 }
