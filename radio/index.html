@@ -38,6 +38,7 @@
       <button class="nav-btn" data-view="artists">Artists</button>
       <button class="nav-btn" data-view="albums">Albums</button>
       <button class="nav-btn" data-view="playlists">Playlists</button>
+      <button class="nav-btn" data-view="favorites">Favorites</button>
       <button class="nav-btn" data-view="library">Library</button>
     </nav>
     <div class="search-box">
@@ -55,6 +56,7 @@
     <div id="view-album-detail" class="view hidden"></div>
     <div id="view-playlists" class="view hidden"></div>
     <div id="view-playlist-detail" class="view hidden"></div>
+    <div id="view-favorites" class="view hidden"></div>
     <div id="view-library" class="view hidden"></div>
     <div id="view-tag-list" class="view hidden"></div>
     <div id="view-tag-detail" class="view hidden"></div>
@@ -97,6 +99,7 @@
     <button id="fs-collapse" aria-label="Collapse">⌄</button>
     <div class="fs-header-title">Now Playing</div>
     <div class="fs-header-actions">
+      <button id="fs-favorite-toggle" class="fs-header-btn" title="Favorite this track">☆</button>
       <button id="fs-lyrics-toggle" class="fs-header-btn hidden" title="Lyrics">Lyrics</button>
       <button id="fs-queue-toggle" class="fs-header-btn" title="Queue">Queue</button>
     </div>
