@@ -415,7 +415,15 @@ let shuffleOn = store.shuffle;
 let repeatMode = store.repeatMode; // "off" | "all" | "one"
 let scrobbledCurrent = false; // whether the current track has already been reported played to Plex
 let radioOn = store.radioMode;
-let crossfadeOn = store.crossfade;
+// iOS Safari ignores HTMLMediaElement.volume (always reads back 1), so a
+// crossfade there would just play both tracks at full volume together.
+const VOLUME_CONTROLLABLE = (() => {
+  const a = new Audio();
+  a.volume = 0.5;
+  return a.volume === 0.5;
+})();
+let crossfadeOn = store.crossfade && VOLUME_CONTROLLABLE;
+if (!VOLUME_CONTROLLABLE) document.querySelectorAll(".np-volume").forEach((n) => n.classList.add("hidden"));
 let folderStack = [{ parentId: null, label: "Folders" }];
 
 const LIBRARY_CATEGORIES = [
@@ -427,6 +435,11 @@ const LIBRARY_CATEGORIES = [
 ];
 
 const el = (id) => document.getElementById(id);
+
+// Plex metadata (titles, tags, search text) comes from file tags and is
+// interpolated into innerHTML templates throughout, so it must be escaped.
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // Two <audio> elements so the next track can be preloaded — and, with
 // crossfade on, faded in — while the current one is still playing. `audio`
@@ -465,7 +478,7 @@ function renderArtistCard(artist) {
   div.className = "card artist";
   div.innerHTML = `
     <img loading="lazy" src="${api.thumbUrl(artist.thumb)}" alt="">
-    <div class="card-title">${artist.title}</div>
+    <div class="card-title">${esc(artist.title)}</div>
   `;
   div.onclick = () => showArtist(artist);
   return div;
@@ -477,7 +490,7 @@ function renderPlaylistCard(playlist) {
   const count = playlist.leafCount != null ? `${playlist.leafCount} track${playlist.leafCount === 1 ? "" : "s"}` : "";
   div.innerHTML = `
     <img loading="lazy" src="${api.thumbUrl(playlist.composite || playlist.thumb)}" alt="">
-    <div class="card-title">${playlist.title}</div>
+    <div class="card-title">${esc(playlist.title)}</div>
     <div class="card-sub">${count}</div>
   `;
   div.onclick = () => showPlaylistDetail(playlist);
@@ -489,8 +502,8 @@ function renderAlbumCard(album) {
   div.className = "card";
   div.innerHTML = `
     <img loading="lazy" src="${api.thumbUrl(album.thumb)}" alt="">
-    <div class="card-title">${album.title}</div>
-    <div class="card-sub">${album.parentTitle || ""}</div>
+    <div class="card-title">${esc(album.title)}</div>
+    <div class="card-sub">${esc(album.parentTitle)}</div>
   `;
   div.onclick = () => showAlbum(album);
   return div;
@@ -540,7 +553,7 @@ async function showArtist(artist) {
   const container = el("view-albums");
   container.innerHTML = `
     <button class="back-btn" id="artist-back">&larr; Back</button>
-    <div class="section-heading">${artist.title}</div>
+    <div class="section-heading">${esc(artist.title)}</div>
     <div class="grid" id="artist-albums-grid"></div>
   `;
   el("artist-back").onclick = showArtists;
@@ -559,8 +572,8 @@ async function showAlbum(album) {
     <div class="album-header">
       <img src="${api.thumbUrl(album.thumb, 400)}" alt="">
       <div>
-        <h2>${album.title}</h2>
-        <div class="sub">${album.parentTitle || ""}${album.year ? " · " + album.year : ""}</div>
+        <h2>${esc(album.title)}</h2>
+        <div class="sub">${esc(album.parentTitle)}${album.year ? " · " + esc(album.year) : ""}</div>
       </div>
     </div>
     <div id="track-list"></div>
@@ -575,7 +588,7 @@ async function showAlbum(album) {
     row.dataset.ratingKey = track.ratingKey;
     row.innerHTML = `
       <div class="idx">${track.index || i + 1}</div>
-      <div class="title">${track.title}</div>
+      <div class="title">${esc(track.title)}</div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
@@ -609,7 +622,7 @@ async function showPlaylistDetail(playlist) {
   const container = el("view-playlist-detail");
   container.innerHTML = `
     <button class="back-btn" id="playlist-back">&larr; Back</button>
-    <div class="section-heading">${playlist.title}</div>
+    <div class="section-heading">${esc(playlist.title)}</div>
     <div id="playlist-track-list"></div>
   `;
   el("playlist-back").onclick = () => showPlaylists();
@@ -622,7 +635,7 @@ async function showPlaylistDetail(playlist) {
     row.dataset.ratingKey = track.ratingKey;
     row.innerHTML = `
       <div class="idx">${i + 1}</div>
-      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
@@ -641,8 +654,8 @@ function renderSimpleRow(title, sub, onClick) {
   row.className = "simple-row";
   row.innerHTML = `
     <div>
-      <div class="row-title">${title}</div>
-      ${sub ? `<div class="row-sub">${sub}</div>` : ""}
+      <div class="row-title">${esc(title)}</div>
+      ${sub ? `<div class="row-sub">${esc(sub)}</div>` : ""}
     </div>
     <div class="row-chevron">&rsaquo;</div>
   `;
@@ -688,7 +701,7 @@ async function showTagList(category) {
   const container = el("view-tag-list");
   container.innerHTML = `
     <button class="back-btn" id="tag-list-back">&larr; Back</button>
-    <div class="section-heading">${category.label}</div>
+    <div class="section-heading">${esc(category.label)}</div>
     <div id="tag-list-rows"></div>
   `;
   el("tag-list-back").onclick = () => showLibrary();
@@ -704,7 +717,7 @@ async function showTagDetail(category, tag) {
   const container = el("view-tag-detail");
   container.innerHTML = `
     <button class="back-btn" id="tag-detail-back">&larr; Back</button>
-    <div class="section-heading">${tag.title}</div>
+    <div class="section-heading">${esc(tag.title)}</div>
     <div class="grid" id="tag-detail-grid"></div>
   `;
   el("tag-detail-back").onclick = () => showTagList(category);
@@ -727,7 +740,7 @@ async function showAllTracks() {
     row.dataset.ratingKey = track.ratingKey;
     row.innerHTML = `
       <div class="idx">♪</div>
-      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
@@ -748,7 +761,7 @@ async function showFolder() {
   const canGoBack = folderStack.length > 1;
   container.innerHTML = `
     ${canGoBack ? `<button class="back-btn" id="folder-back">&larr; Back</button>` : ""}
-    <div class="section-heading">${current.label}</div>
+    <div class="section-heading">${esc(current.label)}</div>
     <div id="folder-rows"></div>
   `;
   if (canGoBack) {
@@ -769,7 +782,7 @@ async function showFolder() {
       row.dataset.ratingKey = item.ratingKey;
       row.innerHTML = `
         <div class="idx">♪</div>
-        <div class="title">${item.title}</div>
+        <div class="title">${esc(item.title)}</div>
         <div class="dur">${fmtDuration(item.duration)}</div>
         <button class="add-to-queue-btn" title="Add to queue">+</button>
         <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
@@ -791,18 +804,21 @@ async function showFolder() {
   });
 }
 
+let searchSeq = 0;
 async function showSearchResults(query) {
+  const seq = ++searchSeq;
   switchView("search");
   const container = el("view-search");
-  container.innerHTML = `<div class="section-heading">Results for "${query}"</div><div id="search-tracks"></div>`;
+  container.innerHTML = `<div class="section-heading">Results for "${esc(query)}"</div><div id="search-tracks"></div>`;
   const results = await api.search(musicSectionKey, query);
+  if (seq !== searchSeq) return; // a newer search superseded this one
   const list = el("search-tracks");
   results.forEach((track, i) => {
     const row = document.createElement("div");
     row.className = "track-row";
     row.innerHTML = `
       <div class="idx">♪</div>
-      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
@@ -1063,7 +1079,7 @@ async function showFavorites() {
     row.dataset.ratingKey = track.ratingKey;
     row.innerHTML = `
       <div class="idx">♪</div>
-      <div class="title">${track.title} <span style="color:var(--text-dim)">— ${track.grandparentTitle || ""}</span></div>
+      <div class="title">${esc(track.title)} <span style="color:var(--text-dim)">— ${esc(track.grandparentTitle)}</span></div>
       <div class="dur">${fmtDuration(track.duration)}</div>
       <button class="add-to-queue-btn" title="Add to queue">+</button>
       <button class="add-to-playlist-btn" title="Add to playlist">📋</button>
@@ -1201,8 +1217,8 @@ function renderQueueView() {
     const canEdit = pos > orderPos;
     row.innerHTML = `
       <div class="queue-row-main">
-        <div class="queue-row-title">${track.title}</div>
-        <div class="queue-row-sub">${track.grandparentTitle || ""}</div>
+        <div class="queue-row-title">${esc(track.title)}</div>
+        <div class="queue-row-sub">${esc(track.grandparentTitle)}</div>
       </div>
       <div class="queue-row-actions">
         ${canEdit ? `<button class="q-up" title="Move up">▲</button><button class="q-down" title="Move down">▼</button><button class="q-remove" title="Remove">✕</button>` : ""}
@@ -1229,7 +1245,11 @@ function onAudioError(e) {
   el2.src = api.transcodeUrl(track);
   if (el2 === audio) el2.play().catch(() => {});
 }
-function onAudioLoadstart(e) { e.target.dataset.fallback = ""; }
+// Only reset the flag for a normal stream URL — the transcode URL itself fires
+// loadstart, and resetting there would let a failing transcode retry forever.
+function onAudioLoadstart(e) {
+  if (!(e.target.currentSrc || e.target.src || "").includes("/music/:/transcode/")) e.target.dataset.fallback = "";
+}
 [audioA, audioB].forEach((elx) => {
   elx.addEventListener("error", onAudioError);
   elx.addEventListener("loadstart", onAudioLoadstart);
@@ -1248,7 +1268,7 @@ let preloadTriggered = false;
 let crossfadeTriggered = false;
 let radioExtendTriggered = false;
 let preloadedNextTrack = null;
-let crossfadeRAF = null;
+let crossfadeRAF = null; // interval id while a crossfade is running
 let lastPlaybackStateSave = 0;
 
 function resetTransitionState() {
@@ -1260,7 +1280,7 @@ function resetTransitionState() {
 
 function cancelCrossfade() {
   if (crossfadeRAF != null) {
-    cancelAnimationFrame(crossfadeRAF);
+    clearInterval(crossfadeRAF);
     crossfadeRAF = null;
   }
 }
@@ -1295,6 +1315,17 @@ function restorePlaybackState() {
 // "audio is the only one that matters" state — used whenever queue state is
 // about to jump around outside the normal end-of-track flow (manual skip,
 // rewinding to the previous track, a fresh playQueue()).
+// Pause or a seek in the middle of a crossfade: drop the fade and leave the next
+// track buffered but silent, so it can start gaplessly when this one ends.
+function interruptCrossfade() {
+  if (crossfadeRAF == null) return;
+  cancelCrossfade();
+  audio.volume = userVolume;
+  standby.pause();
+  standby.currentTime = 0;
+  standby.volume = userVolume;
+}
+
 function abortTransition() {
   cancelCrossfade();
   audio.volume = userVolume;
@@ -1376,18 +1407,18 @@ function beginCrossfade(remaining) {
   standby.volume = 0;
   standby.play().catch(() => {});
   const t0 = performance.now();
-  function tick(now) {
-    const p = Math.min(1, (now - t0) / (fadeSeconds * 1000));
+  // setInterval rather than requestAnimationFrame: rAF stops entirely when the
+  // tab is backgrounded or the screen is locked, which would freeze the fade.
+  function tick() {
+    const p = Math.min(1, (performance.now() - t0) / (fadeSeconds * 1000));
     oldEl.volume = startVol * (1 - p);
     standby.volume = userVolume * p;
-    if (p < 1) {
-      crossfadeRAF = requestAnimationFrame(tick);
-    } else {
-      crossfadeRAF = null;
+    if (p >= 1) {
+      cancelCrossfade();
       completeSwap(oldEl);
     }
   }
-  crossfadeRAF = requestAnimationFrame(tick);
+  crossfadeRAF = setInterval(tick, 100);
 }
 
 function onActiveTimeUpdate() {
@@ -1409,6 +1440,7 @@ function onActiveTimeUpdate() {
 function onActiveEnded() {
   cancelCrossfade();
   if (repeatMode === "one") {
+    scrobbledCurrent = false;
     audio.currentTime = 0;
     audio.play().catch(() => {});
     return;
@@ -1433,6 +1465,7 @@ function onActiveEnded() {
 }
 
 [audioA, audioB].forEach((elx) => {
+  elx.addEventListener("seeking", (e) => { if (e.target === audio) interruptCrossfade(); });
   elx.addEventListener("ended", (e) => { if (e.target === audio) onActiveEnded(); });
   elx.addEventListener("play", (e) => {
     if (e.target !== audio) return;
@@ -1441,6 +1474,7 @@ function onActiveEnded() {
   });
   elx.addEventListener("pause", (e) => {
     if (e.target !== audio) return;
+    if (!audio.ended) interruptCrossfade();
     setPlayIcon(false);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
     savePlaybackState();
@@ -1564,7 +1598,7 @@ function prevTrack() {
   }
 }
 
-function togglePlay() { audio.paused ? audio.play() : audio.pause(); }
+function togglePlay() { audio.paused ? audio.play().catch(() => {}) : audio.pause(); }
 
 function setShuffle(on) {
   shuffleOn = on;
@@ -1597,6 +1631,7 @@ function toggleRadio() {
 }
 
 function toggleCrossfade() {
+  if (!VOLUME_CONTROLLABLE) { showToast("Crossfade isn't supported on this device"); return; }
   crossfadeOn = !crossfadeOn;
   store.crossfade = crossfadeOn;
   updateShuffleRepeatUI();
@@ -1791,6 +1826,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) savePlaybackState();
 });
 
+// Views fetch from Plex without individual try/catch; surface failures instead
+// of leaving a blank view with only a console error.
+window.addEventListener("unhandledrejection", (e) => {
+  console.error(e.reason);
+  showToast("Couldn't reach Plex — try again");
+});
+
 // ---------- Boot ----------
 
 async function boot(isRetry = false) {
@@ -1847,6 +1889,11 @@ async function boot(isRetry = false) {
     restorePlaybackState();
   } catch (err) {
     console.error(err);
+    if (/\(401\)/.test(err.message)) {
+      // Token rejected (expired / revoked) — a stored one would loop here forever.
+      store.token = null;
+      err = new Error("Your Plex session expired — please sign in again.");
+    }
     const hadCachedServer = !!store.server;
     store.server = null;
     // A cached connection can go stale between sessions — dynamic public IP,

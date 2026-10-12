@@ -1,0 +1,287 @@
+// Same-origin Plex proxy for https://reecehaigh.com/radio  (hardened revision)
+//
+// The browser app calls `/plex/*` on its own origin; this Worker forwards each
+// request to the user's Plex Media Server and fixes the response so a browser
+// can read it. Plex pins `Access-Control-Allow-Origin` to https://app.plex.tv,
+// so the static site cannot call a Plex server directly.
+//
+// Server discovery happens here (plex.tv/api/v2/resources). Relay connections
+// are preferred because they are the path reachable from Cloudflare when the
+// home connection has no working port forward.
+//
+// Changes from the first version:
+//  - the resolved server is cached for 1h (was 10 min) and concurrent requests
+//    share one discovery instead of each running their own (thundering herd)
+//  - an expired entry is still used if re-discovery fails (stale-on-error)
+//  - candidate connections are probed in parallel; LAN addresses are skipped
+//  - re-discovery only happens on connection failure, a 401 from a cached
+//    server token, or a gateway error (502/504) — not on any 503
+//  - a rejected Plex token now returns a clean 401 (the app signs out on it)
+//  - optional lock to one server via env.PLEX_MACHINE_ID
+//  - CORS limited to https://reecehaigh.com
+//
+// Optional environment variable (Settings -> Variables and Secrets):
+//   PLEX_MACHINE_ID  your server's machineIdentifier; when set, no other server
+//                    can be reached through this Worker.
+
+const ALLOWED_ORIGIN = "https://reecehaigh.com";
+const BASE_TTL = 3600;              // seconds a resolved server is trusted
+const STALE_TTL = 86400;            // seconds an expired entry may still be used if discovery fails
+const PROBE_TIMEOUT = 10000;        // ms — relay nodes are slow to first byte
+const METHODS = new Set(["GET", "HEAD", "PUT", "POST", "DELETE"]);
+
+// Per-isolate memory: resolved servers by token hash, and in-flight discoveries.
+const memo = new Map();      // hash -> { base, token, at }
+const inflight = new Map();  // hash -> Promise<result|null|{unauthorized}>
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: cors(request) });
+    }
+    if (!METHODS.has(request.method)) {
+      return text("Method not allowed", 405, request);
+    }
+
+    const match = url.pathname.match(/^\/plex(\/.*)?$/);
+    if (!match) return new Response("Not found", { status: 404 });
+    const plexPath = match[1] || "/";
+
+    const token =
+      url.searchParams.get("X-Plex-Token") ||
+      request.headers.get("X-Plex-Token") ||
+      "";
+    if (!token) return text("Missing X-Plex-Token", 401, request);
+
+    const clientId =
+      url.searchParams.get("X-Plex-Client-Identifier") || "radio-plex-proxy";
+
+    const res = await proxy(request, env, url, plexPath, token, clientId, ctx, true);
+    return res || text("Could not reach the Plex server (relay and direct connections all failed).", 502, request);
+  },
+};
+
+async function proxy(request, env, url, plexPath, callerToken, clientId, ctx, allowRetry) {
+  const resolved = await resolveBase(env, callerToken, clientId, ctx);
+  if (!resolved) return null;
+  if (resolved.unauthorized) return text("Plex rejected this token", 401, request);
+  const { base, token: upstreamToken, fresh } = resolved;
+
+  const target = new URL(base + plexPath);
+  for (const [k, v] of url.searchParams) target.searchParams.set(k, v);
+  target.searchParams.set("X-Plex-Token", upstreamToken);
+
+  const fwd = new Headers();
+  for (const h of ["range", "accept", "if-range", "if-none-match", "if-modified-since", "content-type"]) {
+    const v = request.headers.get(h);
+    if (v) fwd.set(h, v);
+  }
+  fwd.set("X-Plex-Token", upstreamToken);
+
+  // The body can only be sent once, so a retry is only safe for bodyless requests.
+  const hasBody = !["GET", "HEAD"].includes(request.method);
+  const canRetry = allowRetry && !fresh && !hasBody;
+
+  let upstream;
+  try {
+    upstream = await fetch(target.toString(), {
+      method: request.method,
+      headers: fwd,
+      body: hasBody ? request.body : undefined,
+      redirect: "follow",
+    });
+  } catch (err) {
+    if (canRetry) {
+      await forget(callerToken);
+      return proxy(request, env, url, plexPath, callerToken, clientId, ctx, false);
+    }
+    return null;
+  }
+
+  // A stale cached server shows up as a gateway error (502/504) or, for a
+  // per-server accessToken that has rotated, a 401. Re-discover once, but only
+  // if this server came from the cache — a freshly resolved one is already
+  // current, and a 503 is Plex being busy rather than the route being dead.
+  if (canRetry && [401, 502, 504].includes(upstream.status)) {
+    await forget(callerToken);
+    return proxy(request, env, url, plexPath, callerToken, clientId, ctx, false);
+  }
+
+  const headers = new Headers(upstream.headers);
+  headers.delete("access-control-allow-origin");
+  headers.delete("access-control-allow-credentials");
+  for (const [k, v] of Object.entries(cors(request))) headers.set(k, v);
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers,
+  });
+}
+
+// Resolves the server for this token. Returns:
+//   { base, token, fresh }  on success (fresh = discovered during this call)
+//   { unauthorized: true }  if plex.tv rejected the token
+//   null                    if nothing is reachable
+async function resolveBase(env, callerToken, clientId, ctx) {
+  const hash = await tokenHash(callerToken);
+  const now = Date.now();
+
+  const m = memo.get(hash);
+  if (m && now - m.at < BASE_TTL * 1000) return { ...m, fresh: false };
+
+  const cached = await readEdgeCache(hash);
+  if (cached && now - cached.at < BASE_TTL * 1000) {
+    memo.set(hash, cached);
+    return { ...cached, fresh: false };
+  }
+
+  // One discovery per token at a time; every concurrent request awaits it.
+  let p = inflight.get(hash);
+  if (!p) {
+    p = discover(env, callerToken, clientId)
+      .then((found) => {
+        if (found && !found.unauthorized) {
+          const entry = { base: found.base, token: found.token, at: Date.now() };
+          memo.set(hash, entry);
+          ctx.waitUntil(writeEdgeCache(hash, entry));
+        }
+        return found;
+      })
+      .finally(() => inflight.delete(hash));
+    inflight.set(hash, p);
+  }
+  const found = await p;
+
+  if (found) return found.unauthorized ? found : { ...found, fresh: true };
+
+  // Discovery failed (plex.tv blip, all probes down): fall back to the last
+  // known server, even past its TTL, rather than failing outright.
+  const stale = m || cached;
+  if (stale && now - stale.at < STALE_TTL * 1000) return { ...stale, fresh: false };
+  return null;
+}
+
+async function discover(env, callerToken, clientId) {
+  let resources;
+  try {
+    const res = await fetch(
+      "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1",
+      {
+        headers: {
+          Accept: "application/json",
+          "X-Plex-Token": callerToken,
+          "X-Plex-Client-Identifier": clientId,
+          "X-Plex-Product": "reecehaigh.com radio (proxy)",
+          "X-Plex-Version": "1.1",
+        },
+      }
+    );
+    if (res.status === 401 || res.status === 403) return { unauthorized: true };
+    if (!res.ok) return null;
+    resources = await res.json();
+  } catch (_) {
+    return null;
+  }
+
+  let servers = (Array.isArray(resources) ? resources : []).filter((r) =>
+    (r.provides || "").includes("server")
+  );
+  // Optional lock to a single server so this Worker can't proxy to anyone else's.
+  if (env.PLEX_MACHINE_ID) {
+    servers = servers.filter((s) => s.clientIdentifier === env.PLEX_MACHINE_ID);
+  }
+
+  // Plex on `network_mode: host` advertises every Docker bridge gateway
+  // (172.16.0.0/12) as a connection; none are reachable.
+  const isDockerBridge = (uri) => {
+    const m = uri.match(/https?:\/\/(\d+)-(\d+)-\d+-\d+\./);
+    return !!m && +m[1] === 172 && +m[2] >= 16 && +m[2] <= 31;
+  };
+
+  for (const s of servers) {
+    const upstreamToken = s.accessToken || callerToken;
+    const seen = new Set();
+    const conns = [];
+    for (const c of s.connections || []) {
+      // LAN addresses are never reachable from Cloudflare.
+      if (!c.uri || c.local || seen.has(c.uri) || isDockerBridge(c.uri)) continue;
+      seen.add(c.uri);
+      conns.push(c);
+    }
+
+    // Probe every candidate at once; the first healthy one wins.
+    try {
+      const base = await Promise.any(
+        conns.map(async (c) => {
+          const r = await fetch(
+            `${c.uri}/identity?X-Plex-Token=${encodeURIComponent(upstreamToken)}`,
+            { signal: AbortSignal.timeout(PROBE_TIMEOUT) }
+          );
+          if (!r.ok) throw new Error(`probe ${r.status}`);
+          return c.uri.replace(/\/$/, "");
+        })
+      );
+      return { base, token: upstreamToken };
+    } catch (_) {
+      /* no connection for this server answered — try the next server */
+    }
+  }
+  return null;
+}
+
+// ---- cache helpers ----------------------------------------------------------
+
+async function readEdgeCache(hash) {
+  try {
+    const hit = await caches.default.match(edgeKey(hash));
+    return hit ? JSON.parse(await hit.text()) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeEdgeCache(hash, entry) {
+  try {
+    await caches.default.put(
+      edgeKey(hash),
+      new Response(JSON.stringify(entry), {
+        headers: { "Cache-Control": `max-age=${STALE_TTL}` },
+      })
+    );
+  } catch (_) { /* cache is best-effort */ }
+}
+
+async function forget(token) {
+  const hash = await tokenHash(token);
+  memo.delete(hash);
+  try { await caches.default.delete(edgeKey(hash)); } catch (_) { /* ignore */ }
+}
+
+const edgeKey = (hash) => new Request(`https://radio-plex-proxy.internal/base/${hash}`);
+
+async function tokenHash(token) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- responses --------------------------------------------------------------
+
+function text(body, status, request) {
+  return new Response(body, { status, headers: cors(request) });
+}
+
+function cors(request) {
+  const origin = request.headers.get("Origin");
+  const headers = {
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+    "Access-Control-Allow-Headers": "X-Plex-Token, X-Plex-Client-Identifier, Accept, Content-Type, Range",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, Content-Type",
+    Vary: "Origin",
+  };
+  // Same-origin requests need no CORS headers at all; only echo our own site.
+  if (origin === ALLOWED_ORIGIN) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+}
