@@ -1,3 +1,4 @@
+const MIN = 60 * 1000;
 const PRODUCT = "reecehaigh.com radio";
 const VERSION = "1.0";
 
@@ -137,6 +138,35 @@ class PlexAPI {
   constructor(baseUrl, token) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.token = token;
+    // Session-only (in-memory) cache for library-wide reads. Nothing is written
+    // to browser storage, so it disappears when the tab is closed.
+    this._cache = new Map(); // key -> { at, value: Promise }
+  }
+
+  // Returns the cached value for `key` while it is younger than ttlMs; otherwise
+  // runs fn. The promise itself is stored, so simultaneous callers share one
+  // request, and a failed request is not cached.
+  cached(key, ttlMs, fn) {
+    const hit = this._cache.get(key);
+    if (hit && Date.now() - hit.at < ttlMs) return hit.value;
+    const value = fn();
+    this._cache.set(key, { at: Date.now(), value });
+    value.catch(() => { if (this._cache.get(key)?.value === value) this._cache.delete(key); });
+    return value;
+  }
+
+  invalidate(prefix) {
+    for (const k of [...this._cache.keys()]) if (k.startsWith(prefix)) this._cache.delete(k);
+  }
+
+  // After a track's rating changes, update every cached copy of it so views
+  // built from the cache (Favorites, albums, search) stay correct without a refetch.
+  patchCached(ratingKey, fields) {
+    for (const { value } of this._cache.values()) {
+      value.then((v) => {
+        if (Array.isArray(v)) v.forEach((item) => { if (item && item.ratingKey === ratingKey) Object.assign(item, fields); });
+      }).catch(() => {});
+    }
   }
 
   async get(path) {
@@ -193,17 +223,37 @@ class PlexAPI {
   }
 
   getArtists(sectionKey) {
-    return this.get(`/library/sections/${sectionKey}/all`).then(c => c.Metadata || []);
+    return this.cached(`artists:${sectionKey}`, 10 * MIN, () =>
+      this.get(`/library/sections/${sectionKey}/all`).then(c => c.Metadata || []));
+  }
+
+  // One request for every album, instead of one getChildren() per artist.
+  getAllAlbums(sectionKey) {
+    return this.cached(`albums:${sectionKey}`, 10 * MIN, () =>
+      this.get(`/library/sections/${sectionKey}/all?type=9`).then(c => c.Metadata || []));
   }
 
   getRecentlyAdded(sectionKey) {
-    return this.get(`/library/sections/${sectionKey}/recentlyAdded`).then(c => c.Metadata || []);
+    return this.cached(`recentAdded:${sectionKey}`, 2 * MIN, () =>
+      this.get(`/library/sections/${sectionKey}/recentlyAdded`).then(c => c.Metadata || []));
+  }
+
+  // Albums ordered by last play. Plex puts never-played albums last, so those
+  // are filtered out client-side rather than relying on a filter query.
+  getRecentlyPlayed(sectionKey) {
+    return this.cached(`recentPlayed:${sectionKey}`, 30 * 1000, () =>
+      this.get(`/library/sections/${sectionKey}/all?type=9&sort=lastViewedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=40`)
+        .then(c => (c.Metadata || []).filter(a => a.lastViewedAt).slice(0, 20)));
   }
 
   getPlaylists() {
-    return this.get("/playlists?playlistType=audio").then(c =>
-      (c.Metadata || []).filter(p => p.playlistType === "audio")
-    );
+    return this.cached("playlists", 5 * MIN, () =>
+      this.get("/playlists?playlistType=audio").then(c =>
+        (c.Metadata || []).filter(p => p.playlistType === "audio")));
+  }
+
+  getAllLeaves(ratingKey) {
+    return this.get(`/library/metadata/${ratingKey}/allLeaves`).then(c => c.Metadata || []);
   }
 
   getPlaylistItems(ratingKey) {
@@ -225,6 +275,7 @@ class PlexAPI {
     const machineId = await this.getMachineIdentifier();
     const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
     const c = await this.request("POST", `/playlists?type=audio&smart=0&title=${encodeURIComponent(title)}&uri=${uri}`);
+    this.invalidate("playlists");
     return c?.Metadata?.[0];
   }
 
@@ -232,6 +283,7 @@ class PlexAPI {
     const machineId = await this.getMachineIdentifier();
     const uri = encodeURIComponent(`server://${machineId}/com.plexapp.plugins.library/library/metadata/${ratingKey}`);
     await this.request("PUT", `/playlists/${playlistRatingKey}/items?uri=${uri}`);
+    this.invalidate("playlists");
   }
 
   // Plex's rating scale is 0-10 (half-star increments) with no dedicated
@@ -239,10 +291,12 @@ class PlexAPI {
   // 10 (5 stars) as its "favorite" signal, and -1 to clear it back to unrated.
   async rate(ratingKey, rating) {
     await this.request("PUT", `/:/rate?key=${ratingKey}&identifier=com.plexapp.plugins.library&rating=${rating}`);
+    this.patchCached(String(ratingKey), { userRating: rating === -1 ? undefined : rating });
   }
 
   getFacet(sectionKey, facet, type) {
-    return this.get(`/library/sections/${sectionKey}/${facet}?type=${type}`).then(c => c.Directory || []);
+    return this.cached(`facet:${sectionKey}:${facet}:${type}`, 10 * MIN, () =>
+      this.get(`/library/sections/${sectionKey}/${facet}?type=${type}`).then(c => c.Directory || []));
   }
 
   getFilteredItems(sectionKey, filterField, tagKey, resultType) {
@@ -250,12 +304,14 @@ class PlexAPI {
   }
 
   getTrackCount(sectionKey) {
-    return this.get(`/library/sections/${sectionKey}/all?type=10&X-Plex-Container-Start=0&X-Plex-Container-Size=0`)
-      .then(c => c.totalSize ?? 0);
+    return this.cached(`trackCount:${sectionKey}`, 10 * MIN, () =>
+      this.get(`/library/sections/${sectionKey}/all?type=10&X-Plex-Container-Start=0&X-Plex-Container-Size=0`)
+        .then(c => c.totalSize ?? 0));
   }
 
   getAllTracks(sectionKey) {
-    return this.get(`/library/sections/${sectionKey}/all?type=10`).then(c => c.Metadata || []);
+    return this.cached(`tracks:${sectionKey}`, 10 * MIN, () =>
+      this.get(`/library/sections/${sectionKey}/all?type=10`).then(c => c.Metadata || []));
   }
 
   getFolder(sectionKey, parentId) {
@@ -273,10 +329,12 @@ class PlexAPI {
     // clients do once a track has mostly finished playing.
     const url = `${this.baseUrl}/:/scrobble?key=${ratingKey}&identifier=com.plexapp.plugins.library&X-Plex-Token=${this.token}`;
     fetch(url).catch(() => {});
+    this.invalidate("recentPlayed:"); // so Home shows this album next time
   }
 
   getChildren(ratingKey) {
-    return this.get(`/library/metadata/${ratingKey}/children`).then(c => c.Metadata || []);
+    return this.cached(`children:${ratingKey}`, 5 * MIN, () =>
+      this.get(`/library/metadata/${ratingKey}/children`).then(c => c.Metadata || []));
   }
 
   search(sectionKey, query) {
@@ -526,6 +584,31 @@ function renderAlbumCard(album) {
   return div;
 }
 
+// Play / Shuffle buttons for albums, artists and playlists. `getTracks` may be
+// async (artists fetch every track on demand). Play starts in order and turns
+// shuffle off; Shuffle turns shuffle on and starts at a random track.
+function heroActions(getTracks) {
+  const wrap = document.createElement("div");
+  wrap.className = "hero-actions";
+  wrap.innerHTML = `
+    <button class="btn-primary" data-act="play">${icon("play")}<span>Play</span></button>
+    <button class="btn-secondary" data-act="shuffle">${icon("shuffle")}<span>Shuffle</span></button>`;
+  wrap.onclick = async (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const shuffle = btn.dataset.act === "shuffle";
+    try {
+      const tracks = await getTracks();
+      if (!tracks || !tracks.length) return showToast("Nothing to play");
+      setShuffle(shuffle);
+      playQueue(tracks, shuffle ? Math.floor(Math.random() * tracks.length) : 0);
+    } catch (err) {
+      showToast("Couldn't load tracks");
+    }
+  };
+  return wrap;
+}
+
 function switchView(view) {
   document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
@@ -537,8 +620,23 @@ function switchView(view) {
 async function showHome() {
   switchView("home");
   const container = el("view-home");
-  container.innerHTML = `<div class="section-heading">Recently Added</div><div class="grid" id="home-grid"></div>`;
+  container.innerHTML = `
+    <div id="home-played" class="hidden">
+      <div class="section-heading">Recently Played</div>
+      <div class="shelf" id="home-played-shelf"></div>
+    </div>
+    <div class="section-heading">Recently Added</div>
+    <div class="grid" id="home-grid"></div>`;
   const grid = el("home-grid");
+  // Recently played is a nice-to-have: if the request fails or nothing has been
+  // played yet, the section just stays hidden.
+  api.getRecentlyPlayed(musicSectionKey).then((albums) => {
+    if (!albums.length || container.classList.contains("hidden")) return;
+    const shelf = el("home-played-shelf");
+    shelf.innerHTML = "";
+    albums.forEach(a => shelf.appendChild(renderAlbumCard(a)));
+    el("home-played").classList.remove("hidden");
+  }).catch(() => {});
   const items = await api.getRecentlyAdded(musicSectionKey);
   items.slice(0, 24).forEach(item => grid.appendChild(renderAlbumCard(item)));
 }
@@ -559,9 +657,7 @@ async function showAlbums() {
   const container = el("view-albums");
   container.innerHTML = `<div class="section-heading">Albums</div><div class="grid" id="albums-grid"></div>`;
   const grid = el("albums-grid");
-  const artists = await api.getArtists(musicSectionKey);
-  const albumLists = await Promise.all(artists.map(a => api.getChildren(a.ratingKey)));
-  const albums = albumLists.flat().sort((a, b) => (b.originallyAvailableAt || "").localeCompare(a.originallyAvailableAt || ""));
+  const albums = (await api.getAllAlbums(musicSectionKey)).slice().sort((a, b) => (b.originallyAvailableAt || "").localeCompare(a.originallyAvailableAt || ""));
   albums.forEach(al => grid.appendChild(renderAlbumCard(al)));
 }
 
@@ -571,9 +667,11 @@ async function showArtist(artist) {
   container.innerHTML = `
     <button class="back-btn" id="artist-back">&larr; Back</button>
     <div class="section-heading">${esc(artist.title)}</div>
+    <div id="artist-actions"></div>
     <div class="grid" id="artist-albums-grid"></div>
   `;
   el("artist-back").onclick = showArtists;
+  el("artist-actions").appendChild(heroActions(() => api.getAllLeaves(artist.ratingKey)));
   const grid = el("artist-albums-grid");
   const albums = await api.getChildren(artist.ratingKey);
   albums
@@ -591,11 +689,13 @@ async function showAlbum(album) {
       <div>
         <h2>${esc(album.title)}</h2>
         <div class="sub">${esc(album.parentTitle)}${album.year ? " · " + esc(album.year) : ""}</div>
+        <div id="album-actions"></div>
       </div>
     </div>
     <div id="track-list"></div>
   `;
   el("album-back").onclick = () => showAlbums();
+  el("album-actions").appendChild(heroActions(() => api.getChildren(album.ratingKey)));
 
   const tracks = await api.getChildren(album.ratingKey);
   const list = el("track-list");
@@ -638,9 +738,11 @@ async function showPlaylistDetail(playlist) {
   container.innerHTML = `
     <button class="back-btn" id="playlist-back">&larr; Back</button>
     <div class="section-heading">${esc(playlist.title)}</div>
+    <div id="playlist-actions"></div>
     <div id="playlist-track-list"></div>
   `;
   el("playlist-back").onclick = () => showPlaylists();
+  el("playlist-actions").appendChild(heroActions(() => api.getPlaylistItems(playlist.ratingKey)));
 
   const tracks = await api.getPlaylistItems(playlist.ratingKey);
   const list = el("playlist-track-list");
@@ -858,7 +960,7 @@ function buildOrder(length, startIndex) {
 }
 
 function playQueue(tracks, index) {
-  queue = tracks;
+  queue = tracks.slice(); // copy: addToQueue() pushes onto `queue`, and `tracks` may be a cached list
   order = buildOrder(tracks.length, index);
   orderPos = shuffleOn ? 0 : index;
   playCurrent();

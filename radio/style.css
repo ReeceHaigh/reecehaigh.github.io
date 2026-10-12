@@ -356,6 +356,37 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .album-header .sub { color: var(--text-dim); font-size: 1.05em; }
 
+/* ---------- Play / Shuffle buttons, horizontal shelf ---------- */
+.hero-actions { display: flex; gap: 0.6em; margin: 1.1em 0 0; flex-wrap: wrap; }
+.section-heading + #artist-actions .hero-actions,
+.section-heading + #playlist-actions .hero-actions { margin: -0.2em 0 1.6em; }
+.btn-primary, .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  border-radius: 999px;
+  padding: 0.62em 1.3em 0.62em 1.1em;
+  font-size: 0.95em;
+  font-weight: 650;
+  border: 1px solid transparent;
+  transition: background 0.15s, transform 0.15s var(--ease), border-color 0.15s;
+}
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent-hot); }
+.btn-secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.btn-secondary:hover { background: var(--surface-3); }
+.btn-primary:active, .btn-secondary:active { transform: scale(0.96); }
+
+.shelf {
+  display: flex;
+  gap: 1.2em;
+  overflow-x: auto;
+  padding: 0.4em 0.2em 1em;
+  margin: 0 -0.2em;
+  scroll-snap-type: x proximity;
+}
+.shelf .card { flex: 0 0 150px; scroll-snap-align: start; }
+
 /* ---------- Track rows ---------- */
 .track-row {
   display: grid;
