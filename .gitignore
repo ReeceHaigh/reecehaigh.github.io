@@ -1,0 +1,8 @@
+# Family history source files contain living people's details and must NEVER be committed.
+# This repo and site are public, and anything committed stays reachable even after deletion.
+*.ged
+*.gedcom
+*.GED
+*.GEDCOM
+family-history/private/
+family-history/*.ged
