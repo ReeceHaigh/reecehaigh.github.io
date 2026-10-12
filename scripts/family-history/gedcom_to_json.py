@@ -204,7 +204,7 @@ def main():
     ap.add_argument("--living-cutoff", type=int, default=110,
                     help="People with no death record born more recently than this many years ago are treated as living")
     ap.add_argument("--include", action="append", default=[], metavar="ID",
-                    help="Also include this living person by GEDCOM id, with NAME ONLY (no dates, places or links). "
+                    help="Also include this living person by GEDCOM id, with FIRST NAME AND SURNAME ONLY (no middle names, dates, places or living relatives). "
                          "Use only for someone who has agreed, e.g. yourself.")
     ap.add_argument("--link-living", action="store_true",
                     help="Where a living person is the only link between two kept people (e.g. a parent between a "
@@ -253,7 +253,8 @@ def main():
         if pid in include:
             # Explicitly requested living person: name only. No dates, places or living relatives.
             full, given, sur = parse_name(r)
-            p = {"n": full or "Unknown", "s": sur}
+            first = given.split()[0] if given.split() else ""          # first name + surname only: middle names are hidden
+            p = {"n": (f"{first} {sur}".strip() or full or "Unknown"), "s": sur}
             sex = (r.get("SEX").value.strip().upper()[:1] if r.get("SEX") else "")
             if sex in ("M", "F"):
                 p["x"] = sex
@@ -380,7 +381,8 @@ def main():
         "meta": {
             "title": a.title,
             "updated": datetime.date.today().isoformat(),
-            "privacy": "Deceased people only",
+            "privacy": ("Deceased people, plus the site owner (name only)" if include else "Deceased people only")
+                       + (", with nameless links where a living person connects the tree" if placeholders else ""),
             "root": root,
             "people": sum(1 for p in people.values() if not p.get("living")),
             "from": min(years) if years else None,
