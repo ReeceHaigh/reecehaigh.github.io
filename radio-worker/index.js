@@ -17,6 +17,8 @@
 //  - re-discovery only happens on connection failure, a 401 from a cached
 //    server token, or a gateway error (502/504) — not on any 503
 //  - a rejected Plex token now returns a clean 401 (the app signs out on it)
+//  - a failed request is retried once with a fresh discovery (flaky relay nodes),
+//    and a 502 now says why (no addresses are ever included in the message)
 //  - optional lock to one server via env.PLEX_MACHINE_ID
 //  - CORS limited to https://reecehaigh.com
 //
@@ -58,16 +60,21 @@ export default {
     const clientId =
       url.searchParams.get("X-Plex-Client-Identifier") || "radio-plex-proxy";
 
-    const res = await proxy(request, env, url, plexPath, token, clientId, ctx, true);
-    return res || text("Could not reach the Plex server (relay and direct connections all failed).", 502, request);
+    // 1 = one automatic retry (with a fresh discovery) if the first attempt fails
+    const res = await proxy(request, env, url, plexPath, token, clientId, ctx, 1);
+    return res || text("Could not reach the Plex server.", 502, request);
   },
 };
 
-async function proxy(request, env, url, plexPath, callerToken, clientId, ctx, allowRetry) {
+async function proxy(request, env, url, plexPath, callerToken, clientId, ctx, retriesLeft) {
   const resolved = await resolveBase(env, callerToken, clientId, ctx);
   if (!resolved) return null;
   if (resolved.unauthorized) return text("Plex rejected this token", 401, request);
-  const { base, token: upstreamToken, fresh } = resolved;
+  if (resolved.failed) {
+    // Say *why*, so a 502 in the browser is diagnosable. Labels only — no addresses.
+    return text(`Could not reach the Plex server:\n- ${resolved.failed.join("\n- ")}`, 502, request);
+  }
+  const { base, token: upstreamToken } = resolved;
 
   const target = new URL(base + plexPath);
   for (const [k, v] of url.searchParams) target.searchParams.set(k, v);
@@ -82,7 +89,7 @@ async function proxy(request, env, url, plexPath, callerToken, clientId, ctx, al
 
   // The body can only be sent once, so a retry is only safe for bodyless requests.
   const hasBody = !["GET", "HEAD"].includes(request.method);
-  const canRetry = allowRetry && !fresh && !hasBody;
+  const canRetry = retriesLeft > 0 && !hasBody;
 
   let upstream;
   try {
@@ -95,18 +102,19 @@ async function proxy(request, env, url, plexPath, callerToken, clientId, ctx, al
   } catch (err) {
     if (canRetry) {
       await forget(callerToken);
-      return proxy(request, env, url, plexPath, callerToken, clientId, ctx, false);
+      return proxy(request, env, url, plexPath, callerToken, clientId, ctx, retriesLeft - 1);
     }
     return null;
   }
 
-  // A stale cached server shows up as a gateway error (502/504) or, for a
-  // per-server accessToken that has rotated, a 401. Re-discover once, but only
-  // if this server came from the cache — a freshly resolved one is already
-  // current, and a 503 is Plex being busy rather than the route being dead.
+  // A dead or flaky route shows up as a gateway error (502/504), or, for a
+  // per-server accessToken that has rotated, a 401. Re-discover once — even if
+  // the server was only just resolved: a relay node can pass the quick /identity
+  // probe and still fail the real request, and a second discovery often lands
+  // on a working one. A 503 is Plex being busy, not a dead route, so no retry.
   if (canRetry && [401, 502, 504].includes(upstream.status)) {
     await forget(callerToken);
-    return proxy(request, env, url, plexPath, callerToken, clientId, ctx, false);
+    return proxy(request, env, url, plexPath, callerToken, clientId, ctx, retriesLeft - 1);
   }
 
   const headers = new Headers(upstream.headers);
@@ -122,20 +130,20 @@ async function proxy(request, env, url, plexPath, callerToken, clientId, ctx, al
 }
 
 // Resolves the server for this token. Returns:
-//   { base, token, fresh }  on success (fresh = discovered during this call)
-//   { unauthorized: true }  if plex.tv rejected the token
-//   null                    if nothing is reachable
+//   { base, token }          on success
+//   { unauthorized: true }   if plex.tv rejected the token
+//   { failed: [reasons] }    if nothing is reachable (reasons are address-free labels)
 async function resolveBase(env, callerToken, clientId, ctx) {
   const hash = await tokenHash(callerToken);
   const now = Date.now();
 
   const m = memo.get(hash);
-  if (m && now - m.at < BASE_TTL * 1000) return { ...m, fresh: false };
+  if (m && now - m.at < BASE_TTL * 1000) return m;
 
   const cached = await readEdgeCache(hash);
   if (cached && now - cached.at < BASE_TTL * 1000) {
     memo.set(hash, cached);
-    return { ...cached, fresh: false };
+    return cached;
   }
 
   // One discovery per token at a time; every concurrent request awaits it.
@@ -143,7 +151,7 @@ async function resolveBase(env, callerToken, clientId, ctx) {
   if (!p) {
     p = discover(env, callerToken, clientId)
       .then((found) => {
-        if (found && !found.unauthorized) {
+        if (found && found.base) {
           const entry = { base: found.base, token: found.token, at: Date.now() };
           memo.set(hash, entry);
           ctx.waitUntil(writeEdgeCache(hash, entry));
@@ -155,16 +163,17 @@ async function resolveBase(env, callerToken, clientId, ctx) {
   }
   const found = await p;
 
-  if (found) return found.unauthorized ? found : { ...found, fresh: true };
+  if (found.base || found.unauthorized) return found;
 
   // Discovery failed (plex.tv blip, all probes down): fall back to the last
   // known server, even past its TTL, rather than failing outright.
   const stale = m || cached;
-  if (stale && now - stale.at < STALE_TTL * 1000) return { ...stale, fresh: false };
-  return null;
+  if (stale && now - stale.at < STALE_TTL * 1000) return stale;
+  return found; // { failed: [...] }
 }
 
 async function discover(env, callerToken, clientId) {
+  const failures = [];
   let resources;
   try {
     const res = await fetch(
@@ -180,18 +189,23 @@ async function discover(env, callerToken, clientId) {
       }
     );
     if (res.status === 401 || res.status === 403) return { unauthorized: true };
-    if (!res.ok) return null;
+    if (!res.ok) return { failed: [`plex.tv returned HTTP ${res.status} when listing servers`] };
     resources = await res.json();
-  } catch (_) {
-    return null;
+  } catch (e) {
+    return { failed: [`could not reach plex.tv (${reason(e)})`] };
   }
 
-  let servers = (Array.isArray(resources) ? resources : []).filter((r) =>
+  const all = (Array.isArray(resources) ? resources : []).filter((r) =>
     (r.provides || "").includes("server")
   );
+  if (!all.length) return { failed: ["this Plex account has no servers (or none shared with it)"] };
+  let servers = all;
   // Optional lock to a single server so this Worker can't proxy to anyone else's.
   if (env.PLEX_MACHINE_ID) {
-    servers = servers.filter((s) => s.clientIdentifier === env.PLEX_MACHINE_ID);
+    servers = all.filter((s) => s.clientIdentifier === env.PLEX_MACHINE_ID);
+    if (!servers.length) {
+      return { failed: [`PLEX_MACHINE_ID is set but matches none of this account's ${all.length} server(s) — check the value, or remove the variable`] };
+    }
   }
 
   // Plex on `network_mode: host` advertises every Docker bridge gateway
@@ -211,17 +225,26 @@ async function discover(env, callerToken, clientId) {
       seen.add(c.uri);
       conns.push(c);
     }
+    if (!conns.length) {
+      failures.push("server is online but advertises no relay or remote connection — enable Remote Access / Relay in Plex");
+      continue;
+    }
 
     // Probe every candidate at once; the first healthy one wins.
     try {
       const base = await Promise.any(
         conns.map(async (c) => {
-          const r = await fetch(
-            `${c.uri}/identity?X-Plex-Token=${encodeURIComponent(upstreamToken)}`,
-            { signal: AbortSignal.timeout(PROBE_TIMEOUT) }
-          );
-          if (!r.ok) throw new Error(`probe ${r.status}`);
-          return c.uri.replace(/\/$/, "");
+          try {
+            const r = await fetch(
+              `${c.uri}/identity?X-Plex-Token=${encodeURIComponent(upstreamToken)}`,
+              { signal: AbortSignal.timeout(PROBE_TIMEOUT) }
+            );
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return c.uri.replace(/\/$/, "");
+          } catch (e) {
+            failures.push(`${c.relay ? "relay" : "direct"} connection: ${reason(e)}`);
+            throw e;
+          }
         })
       );
       return { base, token: upstreamToken };
@@ -229,7 +252,12 @@ async function discover(env, callerToken, clientId) {
       /* no connection for this server answered — try the next server */
     }
   }
-  return null;
+  return { failed: failures.length ? failures : ["no connection to the server worked"] };
+}
+
+function reason(e) {
+  if (e && (e.name === "TimeoutError" || e.name === "AbortError")) return `no answer within ${PROBE_TIMEOUT / 1000}s`;
+  return e && e.message ? e.message.replace(/https?:\/\/\S+/g, "…") : "network error";
 }
 
 // ---- cache helpers ----------------------------------------------------------

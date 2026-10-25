@@ -134,6 +134,16 @@ async function plexLogin(statusEl) {
 
 // ---------- Plex API ----------
 
+// Builds the error for a failed request. The proxy's 502 explains *why* in its
+// body, and the sign-in screen shows `details`, so keep a short piece of it.
+async function plexError(res, path) {
+  let body = "";
+  try { body = (await res.text()).trim().slice(0, 400); } catch (e) { /* no body */ }
+  const err = new Error(`Plex request failed: ${path} (${res.status})`);
+  if (body && !body.startsWith("<")) err.details = body.split("\n");
+  return err;
+}
+
 class PlexAPI {
   constructor(baseUrl, token) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -174,7 +184,7 @@ class PlexAPI {
     const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`, {
       headers: { Accept: "application/json" },
     });
-    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    if (!res.ok) throw await plexError(res, path);
     const data = await res.json();
     return data.MediaContainer;
   }
@@ -185,7 +195,7 @@ class PlexAPI {
       method,
       headers: { Accept: "application/json" },
     });
-    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    if (!res.ok) throw await plexError(res, path);
     const text = await res.text();
     if (!text) return null;
     try { return JSON.parse(text).MediaContainer; } catch (e) { return null; }
@@ -194,7 +204,7 @@ class PlexAPI {
   async getRawText(path) {
     const sep = path.includes("?") ? "&" : "?";
     const res = await fetch(`${this.baseUrl}${path}${sep}X-Plex-Token=${this.token}`);
-    if (!res.ok) throw new Error(`Plex request failed: ${path} (${res.status})`);
+    if (!res.ok) throw await plexError(res, path);
     return res.text();
   }
 
