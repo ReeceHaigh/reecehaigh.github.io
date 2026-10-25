@@ -2676,6 +2676,18 @@ async function boot(isRetry = false) {
       store.token = null;
       err = new Error("Your Plex session expired — please sign in again.");
     }
+    // "No servers" is almost always the wrong Plex account (or an unaccepted
+    // share), so say which account this token belongs to.
+    if (err.details && err.details.some(d => /no servers/.test(d))) {
+      try {
+        const r = await fetch("https://plex.tv/api/v2/user", {
+          headers: { Accept: "application/json", "X-Plex-Token": token, "X-Plex-Client-Identifier": store.clientId, "X-Plex-Product": PRODUCT },
+        });
+        const u = await r.json();
+        const who = u.username || u.title || u.email;
+        if (who) err.details.push(`Signed in to Plex as: ${who}${u.email && u.email !== who ? ` (${u.email})` : ""}`);
+      } catch (e) { /* diagnostics only */ }
+    }
     const hadCachedServer = !!store.server;
     store.server = null;
     // A cached connection can go stale between sessions — dynamic public IP,
